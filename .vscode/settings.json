@@ -1,0 +1,4 @@
+{
+    "dotnet.preferCSharpExtension": true,
+    "ilspy.defaultOutputLanguage": "C# 6.0 / VS 2015"
+}

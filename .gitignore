@@ -1,0 +1,6 @@
+Output/
+obj/
+bin/
+Release/
+*.user
+.vs/

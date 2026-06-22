@@ -1,0 +1,4 @@
+[submodule "KSP-Shared"]
+	path = KSP-Shared
+	url = https://github.com/lhervier/KSP-Shared.git
+	branch = main
