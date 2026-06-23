@@ -66,11 +66,20 @@ namespace com.github.lhervier.ksp.bulldozermod.terrain
                 touched.Add(body);
             }
 
-            // 3. Rebuild every touched body. RebuildSphere re-runs SetupMods (refreshing the mods array, so
-            //    no stale/destroyed references remain) and rebuilds the quads of the active body.
+            // 3. Rebuild every touched body. We use ResetAndWait(), NOT RebuildSphere().
+            //    RebuildSphere = ResetSphere (destroys all quads unconditionally) + StartSphere(force:false),
+            //    and StartSphere bails out early if the PQS is not in the right state at that instant
+            //    (isStarted/scene/isAlive/target guards). At onVesselGoOffRails those are not guaranteed, so
+            //    the quads got destroyed but not rebuilt and SetupMods never ran -> our mod stayed un-setup and
+            //    the terrain came out incoherent (intermittently — a race; see CLAUDE.md).
+            //    ResetAndWait resets, then its coroutine WAITS until the sphere is alive before rebuilding, so
+            //    SetupMods (collect + OnSetup our mods) and the quad build always run cleanly. It is async,
+            //    which is fine: we don't depend on a same-frame mesh (we use skipGroundPositioning + leveling).
+            //    This is what KSP itself uses (PSystemSetup, PQSMod_CelestialBodyTransform); RebuildSphere is
+            //    only a debug context-menu helper.
             foreach (CelestialBody body in touched)
             {
-                body.pqsController.RebuildSphere();
+                body.pqsController.ResetAndWait();
             }
 
             LOGGER.LogInfo($"Applied {actions.Count} action(s); rebuilt {touched.Count} body(ies)");
