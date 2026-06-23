@@ -64,13 +64,10 @@ namespace com.github.lhervier.ksp.bulldozermod.terrain
                 {
                     continue;
                 }
-                foreach (PQSMod_FlattenArea f in body.pqsController.GetComponentsInChildren<PQSMod_FlattenArea>(true))
+                foreach (BulldozerFlattenMod f in body.pqsController.GetComponentsInChildren<BulldozerFlattenMod>(true))
                 {
-                    if (f.gameObject.name == FlattenGoName)
-                    {
-                        Object.DestroyImmediate(f.gameObject);
-                        touched.Add(body);
-                    }
+                    Object.DestroyImmediate(f.gameObject);
+                    touched.Add(body);
                 }
             }
 
@@ -84,7 +81,7 @@ namespace com.github.lhervier.ksp.bulldozermod.terrain
                     LOGGER.LogWarning($"Skipping action on unknown/PQS-less body '{a.bodyName}'");
                     continue;
                 }
-                InjectFlattenArea(body, a.lat, a.lon, a.flattenTo, a.radius);
+                InjectFlattenMod(body, a.lat, a.lon, a.flattenTo, a.radius);
                 touched.Add(body);
                 injected++;
             }
@@ -99,37 +96,23 @@ namespace com.github.lhervier.ksp.bulldozermod.terrain
             LOGGER.LogInfo($"Injected {injected} flatten mod(s); reset {touched.Count} body(ies) for cold rebuild");
         }
 
-        // Builds a stock PQSMod_FlattenArea on a child GameObject of the body's PQS. It must be a child:
+        // Builds our custom BulldozerFlattenMod on a child GameObject of the body's PQS. It must be a child:
         // SetupMods()/GetChildMods() collect PQSMods from the PQS hierarchy's children at rebuild time.
-        private static void InjectFlattenArea(CelestialBody body, double lat, double lon, double flattenTo, double radius)
+        private static void InjectFlattenMod(CelestialBody body, double lat, double lon, double flattenTo, double radius)
         {
             GameObject go = new GameObject(FlattenGoName);
             go.transform.SetParent(body.pqsController.transform, false);
 
-            PQSMod_FlattenArea flatten = go.AddComponent<PQSMod_FlattenArea>();
+            BulldozerFlattenMod flatten = go.AddComponent<BulldozerFlattenMod>();
             flatten.sphere = body.pqsController;
             flatten.modEnabled = true;
             flatten.order = 1000;            // run after the height-generating mods so it overrides them
 
-            // Centre on the vessel via lat/lon (OnSetup resolves the position vector; confirmed correctly
-            // centred on Kerbin/Mun/Minmus/Eve).
-            flatten.useLatLon = true;
-            flatten.bodyName = body.name;
-            flatten.body = body;
             flatten.lat = lat;
             flatten.lon = lon;
-            flatten.alt = flattenTo;         // used only to place the centre point
-
-            // Absolute target height : OnSetup turns it into flattenToRadius = sphere.radius + flattenTo.
-            flatten.flattenTo = flattenTo;
-
-            // Flat disk of `radius`, surrounded by a smooth blend ring (inner..outer) that ramps back to
-            // the surrounding height instead of a vertical (see-through) cliff. smoothStart/End = 0 give
-            // flat tangents at both ends -> a clean S-curve.
-            flatten.innerRadius = radius;
-            flatten.outerRadius = radius + RingWidth;
-            flatten.smoothStart = 0.0;
-            flatten.smoothEnd = 0.0;
+            flatten.flattenTo = flattenTo;   // absolute target altitude (ASL)
+            flatten.radius = radius;         // flat disk radius
+            flatten.ringWidth = RingWidth;   // smooth blend ring outside the disk
         }
     }
 }
