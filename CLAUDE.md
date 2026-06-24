@@ -2,7 +2,9 @@
 
 Mod Kerbal Space Program (KSP 1.12) qui ajoute une **lame de bulldozer** posable sur un rover, pour **niveler / creuser** le terrain autour de lui et préparer une zone constructible. Pas un placeur de structures (≠ Kerbal Konstructs) : on déforme le **vrai** terrain.
 
-> Ce CLAUDE.md conserve l'**architecture retenue** après analyse de faisabilité. Les connaissances KSP transverses (PQS, source décompilée en `d:\ksp-decompiled`, style des commentaires) sont dans le `CLAUDE.md` parent de `kspmod\`.
+> Ce CLAUDE.md conserve l'**architecture retenue** après analyse de faisabilité. Les connaissances KSP transverses (PQS, source décompilée en `c:\Users\lhervier\Perso\ksp-decompiled` / `d:\ksp-decompiled` , style des commentaires) sont dans le `CLAUDE.md` parent de `kspmod\`.
+
+> 🔎 **Passe de vérification décompilé 2026-06-24** (sous-agents, contre `Vessel.cs`/`ScenarioRunner.cs` débruités). Les affirmations techniques ci-dessous ont été recoupées une à une ; les corrections sont signalées par **⚠️ Correction 2026-06-24**. **Tous les numéros de ligne ont été recalés** sur la version courante du décompilé (les anciens — surtout `Vessel.cs:5xxx/6xxx` — venaient de versions intermédiaires et étaient décalés de ~3000 lignes).
 
 ## État du code
 
@@ -10,13 +12,69 @@ Structure calquée sur KSP-ControlFromHere : projet `.NET 4.7.2`, `KSP-Shared` e
 
 > 🏗️ **Règle d'or : ne JAMAIS reconstruire un PQS vivant. Injecter les mods AVANT le build, laisser KSP bâtir à froid.** (refonte 2026-06-23, à valider en jeu)
 >
-> **Le vrai cul-de-sac, c'était de reconstruire à chaud** — `RebuildSphere` **comme** `ResetAndWait`, peu importe la méthode. Tant que le vaisseau actif est posé sur la tuile, le rebuild produit les modes d'échec documentés : **bosse au centre** (le vaisseau « tient » son quad → pas reconstruit, l'ancien terrain reste haut), **trous/fissures** (voisins reconstruits partiellement), terrain incohérent — y compris au 1ᵉʳ flatten. (Détour instructif au passage : `RebuildSphere` = `ResetSphere` + `StartSphere(force:false)`, et `StartSphere(force:false)` bailout si `!isAlive`/`target==null`/`isStarted`/scène ; KSP n'utilise jamais `RebuildSphere` en prod — c'est un helper debug. Mais même la bonne API de rebuild ne sauve pas : le problème est de rebuilder *avec le vaisseau dessus*.)
+> **Le vrai cul-de-sac, c'était de reconstruire à chaud** — `RebuildSphere` **comme** `ResetAndWait`, peu importe la méthode. Tant que le vaisseau actif est posé sur la tuile, le rebuild produit les modes d'échec documentés : **bosse au centre** (le vaisseau « tient » son quad → pas reconstruit, l'ancien terrain reste haut), **trous/fissures** (voisins reconstruits partiellement), terrain incohérent — y compris au 1ᵉʳ flatten. (Détour instructif au passage : `RebuildSphere` = `ResetSphere()` + `StartSphere(force:false)` ([`PQS.cs:919-923`](file:///c:/Users/lhervier/Perso/ksp-decompiled/PQS.cs)). ⚠️ **Correction 2026-06-24** sur les bailouts de `StartSphere(force:false)` : seul `isStarted` est un vrai *early-return* en tête ([`PQS.cs:778`](file:///c:/Users/lhervier/Perso/ksp-decompiled/PQS.cs)) — mais `ResetSphere()` vient justement de le remettre à `false`, donc il ne se déclenche pas dans ce chemin ; `!isAlive` ([`:849`](file:///c:/Users/lhervier/Perso/ksp-decompiled/PQS.cs)) et `target==null` ([`:853`](file:///c:/Users/lhervier/Perso/ksp-decompiled/PQS.cs)) sont des retours **tardifs** (après `SetupMods`/`UpdateVisual`, ils ne sautent que `UpdateQuadsInit`) ; le test de scène est **dans le bloc `if(force)` uniquement** → ne concerne pas `force:false`. KSP n'appelle jamais `RebuildSphere` dans le pipeline de vol — seulement via 2 `[ContextMenu]` éditeur et un watchdog de récupération sur *stall* détecté dans `PQS.Update()` ([`PQS.cs:2378`](file:///c:/Users/lhervier/Perso/ksp-decompiled/PQS.cs)). Mais même la bonne API de rebuild ne sauve pas : le problème est de rebuilder *avec le vaisseau dessus*.)
 >
 > **Pattern qui marche (stock / Kopernicus / Kerbal Konstructs) : les `PQSMod` sont dans la liste AVANT que la sphère bâtisse.** Découverte clé : à **chaque** chargement de vol, `FlightDriver` → `PSystemSetup.SetPQSActive(pqs)` → **`pqs.ForceStart()`** reconstruit le PQS du corps actif **pendant que le vaisseau est encore PACKED** (à froid, aucune tuile tenue). `ForceStart` rejoue `SetupMods` (collecte + `OnSetup` de nos mods enfants). Donc si nos `FlattenArea` sont présents **avant** `SetPQSActive`, les quads se bâtissent plats tout seuls, et `CheckGroundCollision` assoit/met de niveau le rover sur le sol déjà plat.
 >
-> **Implémentation :** purge + injection + **`ResetAndWait` des corps touchés**, le tout dans **`BulldozerScenario.OnLoad`** (écran de chargement, vaisseau packed). Le reset est **nécessaire** : `ForceStart` ne reconstruit PAS les quads déjà bâtis (test 14:07 : analytique = flattenTo mais quad sous rover resté pristine + voisins en patchwork plat/naturel = trous). Le reset détruit tous les quads → le build suivant (ForceStart de KSP, ou la coroutine de `ResetAndWait`) les rebâtit **tous** avec le mod, à froid. `BulldozerTerrainApplier` **supprimé** (plus de `skipGroundPositioning`/`LevelVessel` : on parie que KSP assoit de niveau sur le froid-plat ; à confirmer). ⚠️ **Risque restant** : `ResetAndWait` async — si le quad sous le rover se rebâtit *après* le seating, la bosse peut revenir (course). Lancer en `OnLoad` (tôt) maximise les chances ; sinon, fallback = maintenir le vaisseau *packed* jusqu'à fin du rebuild.
+> **Implémentation :** purge + injection + **`ResetAndWait` des corps touchés**, le tout dans **`BulldozerScenario.OnLoad`** (écran de chargement, vaisseau packed). Le reset est **nécessaire empiriquement** (test 14:07 sans reset : analytique = flattenTo mais quad sous rover resté pristine + voisins en patchwork plat/naturel = trous). ⚠️ **Correction 2026-06-24 :** la justification « `ForceStart` ne reconstruit PAS les quads déjà bâtis » est **fausse au regard du décompilé**. `ForceStart` → `StartSphere(force:true)` → `UpdateQuadsInit` → `CreateQuads()` ([`PQS.cs:1351`](file:///c:/Users/lhervier/Perso/ksp-decompiled/PQS.cs)) **détruit inconditionnellement les 6 root quads** (`quads[i].Destroy()`) puis les réalloue, rejouant les mods ; aucun garde `isBuilt` ne préserve de quads. Le reset reste retenu (résultat in-game observé), mais le *pourquoi* exact est **à re-trancher** : hypothèse = il purge aussi les quads-feuilles subdivisés et garantit un rebuild complet à froid. Dans tous les cas, le build final est fait par le `ForceStart` de KSP, à froid. `BulldozerTerrainApplier` **supprimé** (plus de `skipGroundPositioning`/`LevelVessel` : on parie que KSP assoit de niveau sur le froid-plat ; ✅ **confirmé par lecture du décompilé**, voir « Vérification du seating » ci-dessous).
+>
+> ✅ **Le « risque async » redouté n'existe PAS (vérifié 2026-06-23 dans le décompilé).** On craignait que `ResetAndWait` (coroutine) rebâtisse le quad sous le rover *après* le seating → bosse de retour. Faux : `ResetAndWait` ([`PQS.cs:940`](file:///c:/Users/lhervier/Perso/ksp-decompiled/PQS.cs)) ne fait en pratique que le `ResetSphere()` (destruction des quads) ; sa coroutine d'attente est **tuée** juste après par le `StopCoroutine("ResetAndWaitCoroutine")` de **`ForceStart`** ([`PQS.cs:925`](file:///c:/Users/lhervier/Perso/ksp-decompiled/PQS.cs)), qui enchaîne sur `StartSphere(force:true)` et **rebâtit lui-même, synchronement**. Donc le rebuild est fait par KSP, pas par notre coroutine.
 >
 > ⏳ **Reste (séparé) : le « saut » générique des suspensions au rechargement** — indépendant du mod (toute save). Visé sans succès par KSP-SaveDeformation. Sous-tâche optionnelle.
+
+### Vérification du seating (lecture décompilé, 2026-06-23) — le bug des « 3 m »
+
+**Symptôme :** au rechargement, le rover apparaît ~3 m au-dessus de l'altitude de la zone qu'on vient d'aplanir.
+
+**Deux acteurs, exécutés à des phases DIFFÉRENTES du chargement (l'ordre est garanti par le pipeline KSP, pas par notre code) :**
+- `BulldozerScenario.OnLoad` (injection du PQSMod) est déclenché par le `ScenarioRunner` **pendant le chargement de la partie, AVANT que le vaisseau quitte les rails**. ⚠️ **Correction 2026-06-24 (décompilé débruité) :** le déclencheur n'est **PAS** `onLevelWasLoaded` — son handler ([`ScenarioRunner.cs:53`](file:///c:/Users/lhervier/Perso/ksp-decompiled/ScenarioRunner.cs)) fait `return` sauf en `MAINMENU`. Le vrai chemin FLIGHT est `SetProtoModules` ([`ScenarioRunner.cs:211`](file:///c:/Users/lhervier/Perso/ksp-decompiled/ScenarioRunner.cs), appelé par le pipeline `Game.Start`) → `LoadModules` ([`ScenarioRunner.cs:143`](file:///c:/Users/lhervier/Perso/ksp-decompiled/ScenarioRunner.cs), gardé par `targetScenes.Contains(HighLogic.LoadedScene)`) → `ProtoScenarioModule.Load` → `AddModule` → `ScenarioModule.Load` → `OnLoad`. (Le `ScenarioRunner` s'abonne bien à `onLevelWasLoaded` en [`:25`](file:///c:/Users/lhervier/Perso/ksp-decompiled/ScenarioRunner.cs), mais cet abonnement ne sert que le MAINMENU.) La conclusion — `OnLoad` pendant le chargement, avant l'off-rails — **reste vraie**, mais par ce chemin-là.
+- `BulldozerVesselSeater.OnVesselGoOffRails` est déclenché par `Vessel.GoOffRails()` → **`GameEvents.onVesselGoOffRails.Fire`** ([`Vessel.cs:2965`](file:///c:/Users/lhervier/Perso/ksp-decompiled/Vessel.cs)), **bien plus tard**, pendant l'easing physique. ⇒ `OnLoad` (injection) précède **toujours** le Seater.
+
+**Séquence réelle vérifiée :**
+1. Scène FLIGHT chargée → `OnLoad` → `InjectActions` → `ResetAndWait` = `ResetSphere()` (détruit tous les quads) + coroutine d'attente.
+2. `FlightDriver.Start` ([`FlightDriver.cs:533-534`](file:///c:/Users/lhervier/Perso/ksp-decompiled/FlightDriver.cs)) : `pqsController.SetTarget(vessel.transform)` (cible de subdivision = le rover) → `SetPQSActive` → `ForceStart` → tue notre coroutine → `StartSphere(force:true)` → `SetupMods()` (collecte notre mod) → **`UpdateQuadsInit()`**.
+3. **`UpdateQuadsInit` ([`PQS.cs:2103`](file:///c:/Users/lhervier/Perso/ksp-decompiled/PQS.cs)) bâtit TOUT synchronement** : boucle `UpdateSubdivisionInit` qui subdivise jusqu'au **niveau max autour de la cible** jusqu'à stabilisation, puis `quadAllowBuild=true` + `UpdateSubdivision` construit les mesh ; sur les quads sub-max, `PQSMod_QuadMeshColliders.OnQuadBuilt` pose le **collider**.
+4. *Plus tard*, le rover quitte les rails → `GoOffRails` → (selon le gating ci-dessous) `CheckGroundCollision`.
+
+**Conclusion : le mesh plat ET son collider sous le rover sont prêts AVANT que le rover quitte les rails** (bâtis synchronement par `ForceStart` à l'étape 2-3). ⚠️ **Correction 2026-06-24 (voir « Gating du re-seating » ci-dessous) :** dans notre flux, KSP **n'assoit PAS** le rover via `CheckGroundCollision` — celui-ci est **sauté** (`skipGroundPositioning=true`). Le rover atterrit en **tombant** sur la dalle déjà plate sous l'effet de la physique, pas par re-seating. Le résultat final (rover sur sol plat) est identique, mais le mécanisme supposé ici était faux.
+
+**Le coupable des 3 m est le `BulldozerVesselSeater`**, de deux façons concordantes :
+- son handler tourne **APRÈS** `CheckGroundCollision` : dans `GoOffRails`, l'appel `CheckGroundCollision()` (bloc `IL_011e`, [`Vessel.cs:2983`](file:///c:/Users/lhervier/Perso/ksp-decompiled/Vessel.cs) ; la méthode elle-même en [`:2992`](file:///c:/Users/lhervier/Perso/ksp-decompiled/Vessel.cs)) puis `goto IL_0193` où le `Fire` de l'event tombe ([`Vessel.cs:2965`](file:///c:/Users/lhervier/Perso/ksp-decompiled/Vessel.cs)) — l'ordre d'exécution réel (via les `goto`) place bien le `Fire` après `CheckGroundCollision` malgré son numéro de ligne inférieur. ⇒ le `skipGroundPositioning=true` posé dans le handler arrive **trop tard** pour cette passe (le commentaire du fichier qui dit « fires just BEFORE CheckGroundCollision » est **faux**) ;
+- et il **remonte le rover de `Clearance = 3.0` m** ([`Src/BulldozerVesselSeater.cs:101`](file:///c:/Users/lhervier/Perso/KSP-BulldozerMod/Src/BulldozerVesselSeater.cs)) via `RaiseAboveFlat`, sur un rover **déjà bien assis**.
+
+**Décision : retirer entièrement `BulldozerVesselSeater`** (`skipGroundPositioning` inutile car trop tard ; `LevelVessel`/`RaiseAboveFlat` cassent un seating déjà correct). À tester en jeu après suppression. ⚠️ Le fichier `Src/BulldozerVesselSeater.cs` n'était **pas** documenté dans la liste « Implémenté » plus bas — il a été ajouté après la suppression de `BulldozerTerrainApplier` et réintroduisait par erreur le `skipGroundPositioning`/`LevelVessel` qu'on avait abandonné.
+
+### Gating du re-seating au chargement — `GoOffRails` ne repose PAS toujours (lecture décompilé, 2026-06-24)
+
+**Découverte clé : `CheckGroundCollision` (le re-seating) est conditionnel.** `Vessel.GoOffRails()` ([`Vessel.cs:2838`](file:///c:/Users/lhervier/Perso/ksp-decompiled/Vessel.cs), **fichier nettoyé** des `switch`/`while` parasites ; ✅ gating re-vérifié 2026-06-24 sur le décompilé débruité) décide via `skipGroundPositioning`. Pour un vaisseau **`Landed`, pas `Splashed`, pas `PRELAUNCH`** :
+
+```
+si  PQSminLevel != 0  ET  PQSmaxLevel != 0
+ET  PQSminLevel == mainBody.pqsController.minLevel
+ET  PQSmaxLevel == mainBody.pqsController.maxLevel
+   → skipGroundPositioning = true  → CheckGroundCollision() sort direct → AUCUN re-seating
+sinon
+   → skipGroundPositioning = false → CheckGroundCollision() repose le rover (raycast)
+```
+
+- `PQSminLevel`/`PQSmaxLevel` sont des champs **sauvegardés dans le .sfs** (`PQSMin`/`PQSMax`, [`ProtoVessel.cs:2260-2261`](file:///c:/Users/lhervier/Perso/ksp-decompiled/ProtoVessel.cs)) ; ils mémorisent le niveau de subdivision PQS qu'avait le terrain **au moment où le rover s'est posé** (posé quand `Landed`, [`Vessel.cs:1205-1206`](file:///c:/Users/lhervier/Perso/ksp-decompiled/Vessel.cs) ; également (ré)affecté au setup vaisseau en [`:2026-2027`](file:///c:/Users/lhervier/Perso/ksp-decompiled/Vessel.cs)). KSP les compare au PQS courant : **identiques ⇒ il fait confiance à la pose sauvegardée et NE repose pas** ; différents (réglage de détail changé, ou champs absents/zéro) ⇒ il repose.
+
+**Conséquence directe pour le mod :** notre `BulldozerFlattenMod` **ne change PAS** `minLevel/maxLevel` du corps (on n'augmente pas la subdivision, juste la hauteur). Donc au reload, `PQSMin/Max` de la save **correspondent toujours** au PQS courant → `skipGroundPositioning = true` → **`CheckGroundCollision` est sauté**. Le rover réapparaît à son altitude sauvegardée (son altitude d'atterrissage *naturelle*, donc **au-dessus** de la dalle qu'on vient d'abaisser) et **tombe** sur la dalle plate. C'est ce qui rend le « apparaît en l'air puis tombe » de la décision pragmatique **inévitable par construction**, et non un re-seating propre.
+
+**Le levier pour forcer un assoiement franc (sans chute) :** mettre **`PQSMin = 0`** (ou supprimer les deux champs) dans la save de reload `"BulldozerReload"`. La condition `PQSminLevel != 0` échoue → `skipGroundPositioning` reste `false` → **`CheckGroundCollision` s'exécute** : raycast depuis 5000 m, calcul du point bas via `getLowestPoint`, et repose le rover sur la dalle **quelle que soit l'altitude de la save**. Piste pour le nivellement « zéro mouvement » différé — à mettre en regard du comportement de `getLowestPoint` sur les roues (ci-dessous).
+
+**Mini-test mental confirmé :** « poser sur pente → save → éditer altitude +10 m → load » ne donne **pas** « rover toujours au sol ». Avec `PQSMin/Max` intacts → rover à +10 m → **chute** de 10 m (rebond/casse selon gravité+suspensions). Avec `PQSMin=0` → re-seating propre sur le terrain.
+
+### Les wheel colliders ne sont pas des colliders comme les autres (lecture décompilé, 2026-06-24)
+
+Le point bas du vaisseau qu'utilise le re-seating vient de `Vessel.getLowestPoint()` ([`Vessel.cs:3101`, fichier nettoyé](file:///c:/Users/lhervier/Perso/ksp-decompiled/Vessel.cs)). Il traite **différemment** les colliders de roue (layers **26 = WheelCollidersIgnore, 27 = WheelColliders, 30**) :
+
+- collider normal (mesh/box) → point bas = `collider.ClosestPoint(...).z` (géométrie réelle, précise) ;
+- collider de roue → point bas = `collider.bounds.min.z` (juste l'AABB), puis si le nom contient `WheelCollider` : `num -= wheelCollider.radius; num -= 0.15f`.
+
+**Pourquoi :** un `WheelCollider` Unity n'est pas géométrique — c'est un **raycast le long de l'axe de suspension** depuis le moyeu ; son `transform`/`bounds` est centré sur le **moyeu**, pas sur le patch de contact. KSP ne peut donc pas faire `ClosestPoint` dessus → il prend le bord de l'AABB puis **soustrait le rayon à la main** (+0,15 m de marge) = **approximation**. De plus les GameObjects de wheel collider sont **désactivés quand le vaisseau est packed** → `getLowestPoint` doit les **réactiver temporairement** pour mesurer, et appelle même `ModuleWheelBase.onPartUnpack` avant.
+
+**Lien avec le « saut » des suspensions :** la pose est calculée à froid (suspension au repos / pleine extension, springRate manipulé à l'unpack — `ModuleWheelBase.onPartUnpack`/`onDockingComplete` mettent `springRate=0` puis le restaurent). Dès que la physique tourne, la suspension trouve sa compression d'équilibre ⇒ déplacement vertical inévitable. C'est **inhérent** (toute save avec roues), indépendant du mod. Pertinent surtout pour la piste « zéro mouvement » : reproduire la pose exacte demanderait la course de suspension d'équilibre que KSP lui-même ne connaît pas avant de lancer la physique — d'où la difficulté, déjà constatée, de l'AABB d'un bras de grue qui plonge ~10 m sous les roues et fausse `getLowestPoint`.
 
 ### Outil de diagnostic (read-only)
 `Src/diagnostics/BulldozerDiagnosticPlugin.cs` — `[KSPAddon(Flight)]`, **2ᵉ bouton toolbar à icône grise « vide »** (générée en code, distincte du bouton flatten). Au clic, **ne modifie rien** : dump dans `KSP.log` de (a) la pose vaisseau .sfs + dérivés de seating (`lat/lon/alt/hgt`, `heightFromTerrain`, point bas collider/roues vs `GetSurfaceHeight`), et (b) pour le quad-feuille sous le rover + 4 voisins, chaque sommet du mesh avec son altitude **mesh** vs **analytique** et leur `delta`. Sert à comprendre le lien pose↔PQS et à mesurer l'écart mesh/analytique.
@@ -31,7 +89,7 @@ Structure calquée sur KSP-ControlFromHere : projet `.NET 4.7.2`, `KSP-Shared` e
 - `Src/persistence/BulldozerScenario.cs` — `ScenarioModule` (`AddToAllGames`, FLIGHT/SPACECENTER/TRACKSTATION) : **source de vérité** par save. `OnLoad`/`OnSave` (dé)sérialisent les actions ; `AddAction` enregistre. **`OnLoad` appelle `TerrainLeveler.InjectActions`** (purge + injection + `ResetAndWait` à froid) — c'est là que tout se joue, pendant le chargement (vaisseau packed).
 - `Src/BulldozerPlugin.cs` — `[KSPAddon(Flight)]`, bouton toolbar. Au clic : enregistre une action (cible = `TerrainAltitude` sous le rover, rayon 500 m) → `SaveGame` (save **dédiée** `"BulldozerReload"`, pas `"persistent"`) → `FlightDriver.StartAndFocusVessel`. **Pas de nivellement manuel, pas de patch `.sfs`, pas de repositionnement.** (Essayé puis retiré : cible « point bas du footprint » — sur une grue le bras décalait le min ailleurs → dalle au mauvais niveau.)
 - `Src/terrain/TerrainLeveler.cs` — `InjectActions` = **purge** nos `BulldozerFlattenMod` (anti-fuite inter-saves) → **injecte** un **`BulldozerFlattenMod`** (notre PQSMod custom, voir ci-dessous) enfant par action → **`ResetAndWait`** des corps touchés (rebuild de TOUS les quads à froid). Appelé depuis `BulldozerScenario.OnLoad`.
-- `Src/terrain/BulldozerFlattenMod.cs` — **notre PQSMod custom** = un `FlattenArea` **sans la barrière `quadActive`**. Indispensable : `positionPlanet = dir × GetSurfaceHeight(dir)` utilise l'overload **public** (`override=false`), pour lequel le `FlattenArea` **stock** sort sur `quadActive` → renvoie la hauteur **naturelle** → le quad est positionné en naturel mais maillé plat → **mesh décalé de ~(naturel−flattenTo) ≈ +13 m** (terrain surélevé + rover encastré → explosion). Notre mod applique **inconditionnellement** → `GetSurfaceHeight` cohérent en `false` ET `true` → `positionPlanet` et sommets alignés. (Perf : tourne sur tous les sommets ; court-circuit spatial différé.)
+- `Src/terrain/BulldozerFlattenMod.cs` — **notre PQSMod custom** = un `FlattenArea` **sans la barrière `quadActive`**. Indispensable : `positionPlanet = dir × GetSurfaceHeight(dir)` (⚠️ **Correction 2026-06-24 :** calculé dans **`PQ.cs:389/1026`** lors du build du quad, **pas** dans `PQSMod_FlattenArea`) utilise l'overload **public** (`override=false` ; param réel `overrideQuadBuildCheck`), pour lequel le `FlattenArea` **stock** sort sur `quadActive` → renvoie la hauteur **naturelle** → le quad est positionné en naturel mais maillé plat → **mesh décalé de ~(naturel−flattenTo) ≈ +13 m** (terrain surélevé + rover encastré → explosion). Notre mod applique **inconditionnellement** → `GetSurfaceHeight` cohérent en `false` ET `true` → `positionPlanet` et sommets alignés. (Perf : tourne sur tous les sommets ; court-circuit spatial différé.)
 - ~~`Src/BulldozerTerrainApplier.cs`~~ — **supprimé 2026-06-23** (le rebuild à chaud + `skipGroundPositioning`/`LevelVessel` étaient le cul-de-sac ; remplacés par l'injection avant build).
 
 **Repositionner le rover = cul-de-sac (abandonné, voir l'historique des explosions).** Tout repositionnement **en vol** d'un vaisseau en physique active le **disloque** : `CheckGroundCollision()` direct → explosion ; `GoOnRails`/`GoOffRails` (le vaisseau **actif** ne se packe pas vraiment) → explosion aussi. La voie « recharger avec pose exacte + `skipGroundPositioning=True` » (façon ReRoot, physiquement sûre) bute sur le **calcul de l'altitude du point bas** : AABB des colliders d'une grue plonge ~10 m sous les roues, `TerrainAltitude(centre)` enterre la roue aval. Constat : **KSP ne nivelle PAS un vaisseau posé au chargement** (il réapparaît à sa rotation puis se tasse). 
@@ -61,7 +119,7 @@ Minmus (petit) n'est PAS le plus fin (sub 6). **Aucun corps n'approche 10 m** ; 
 
 ### Validé en jeu sur Kerbin / Mun / Minmus / Eve
 
-Le mécanisme **fonctionne et est correctement centré** sur tous les corps testés : `probeAfter == target` et `rover<->modCenter angle = 0.0°, surfOffset = 0.0 m` partout (le centrage via `useLatLon` est bon — `GetSurfaceNVector(identité)` == `GetRelSurfaceNVector`).
+Le mécanisme **fonctionne et est correctement centré** sur tous les corps testés : `probeAfter == target` et `rover<->modCenter angle = 0.0°, surfOffset = 0.0 m` partout (le centrage via `useLatLon` est bon — ⚠️ **précision 2026-06-24 :** `GetSurfaceNVector` == `GetRelSurfaceNVector` **seulement sous frame identité** : `GetSurfaceNVector` applique en plus `BodyFrame.LocalToWorld` (rotation/spin du corps), pas `GetRelSurfaceNVector` ([`CelestialBody.cs:1335` vs `:1342`](file:///c:/Users/lhervier/Perso/ksp-decompiled/CelestialBody.cs)) ; l'égalité observée (angle 0,0°) tient parce que la comparaison se fait dans le même frame des deux côtés, pas parce qu'elles sont inconditionnellement égales).
 
 **Le rebuild EN DIRECT est fondamentalement fragile** (cul-de-sac). Symptômes observés, tous dus au fait de reconstruire un PQS vivant que d'autres systèmes manipulent en même temps :
 
@@ -95,7 +153,7 @@ Valeur **lisible par code** (vérifié dans le décompilé) : `PQSCache.PresetLi
 
 Test « au max » ⇔ `PQSCache.PresetList.presetIndex == PQSCache.PresetList.presets.Count - 1`. Variante robuste si l'ordre n'est pas garanti : prendre le preset dont les `spherePresets[].maxSubdivision` sont les plus élevés et vérifier que c'est l'actif.
 
-**Piège de diagnostic à retenir :** pour sonder la hauteur après flatten, il FAUT l'overload **interne** `PQS.GetSurfaceHeight(Vector3d, bool)` avec `true` (via réflexion). L'overload public passe `false` → le `FlattenArea` sort sur sa barrière `quadActive` (jamais positionnée hors d'un vrai build de quad) et renvoie la hauteur d'origine → probe faussé (faux négatif).
+**Piège de diagnostic à retenir :** pour sonder la hauteur après flatten, il FAUT l'overload **interne** `PQS.GetSurfaceHeight(Vector3d radialVector, bool overrideQuadBuildCheck)` ([`PQS.cs:6637`](file:///c:/Users/lhervier/Perso/ksp-decompiled/PQS.cs)) avec `true` (via réflexion). L'overload public ([`PQS.cs:6632`](file:///c:/Users/lhervier/Perso/ksp-decompiled/PQS.cs)) passe `false` → le `FlattenArea` sort sur sa barrière `quadActive` (jamais positionnée hors d'un vrai build de quad) et renvoie la hauteur d'origine → probe faussé (faux négatif). Le bool est propagé à chaque mod via `mods[i].overrideQuadBuildCheck` dans `Mod_OnVertexBuildHeight`.
 
 **Code de debug à retirer une fois la résolution tranchée :** `DebugDigDepth` (creuse au lieu d'aplanir à plat) dans `TerrainLeveler`, et `FlattenRadius = 500` dans `BulldozerPlugin`.
 
@@ -112,10 +170,10 @@ Test « au max » ⇔ `PQSCache.PresetList.presetIndex == PQSCache.PresetList.pr
 
 Le terrain KSP est un **PQS** (Procedural Quadtree Sphere) : la hauteur d'un sommet n'est **pas stockée**, elle est **recalculée** à chaque construction de quad par la somme des **PQSMods** (`PQS.BuildQuad` → `Mod_OnVertexBuildHeight`). Surtout, la hauteur « logique » qu'utilise tout le jeu vient de `PQS.GetSurfaceHeight`, qui **rejoue le même calcul analytique**, indépendamment du maillage affiché.
 
-Conséquences vérifiées dans `d:\ksp-decompiled` :
+Conséquences vérifiées dans `c:\Users\lhervier\Perso\ksp-decompiled` :
 
 - **Éditer le `mesh` d'un quad est purement cosmétique** : `GetSurfaceHeight` ignore le mesh, donc tout se désynchronise (état posé, altitude, autres vaisseaux) et l'édition disparaît au prochain rebuild du quad. → **Il faut modifier les PQSMods, pas le maillage.**
-- Le collider physique = le mesh du quad (`PQSMod_QuadMeshColliders.OnQuadBuilt` : `meshCollider.sharedMesh = quad.mesh`), uniquement sur les quads de subdivision max.
+- Le collider physique = le mesh du quad (`PQSMod_QuadMeshColliders.OnQuadBuilt` : `meshCollider.sharedMesh = quad.mesh`), uniquement sur les quads dont `subdivision >= minLevel` avec `minLevel = sphere.maxLevel - |maxLevelOffset|` (⚠️ précision 2026-06-24 : `maxLevelOffset` est un champ configurable, **0 par défaut** ⇒ subdivision max seulement, mais un corps peut étendre le collider aux niveaux sub-max).
 - La déformation **temps réel** (lame qui aplanit en roulant) est rejetée : elle exigerait un rebuild ciblé des quads à chaque frame → coûteux et fragile. Le modèle **acte discret + rechargement** l'évite : c'est le rechargement qui régénère les quads (comme le font les flatten stock `PQSMod_FlattenArea` / `MapDecal`, appliqués au chargement).
 
 API utile (vérifiée) : `PQS.quads` (`PQ[]`) + `PQS.normalUpdateList` pour énumérer les quads actifs ; `PQ.verts` (`Vector3[]`) + `PQ.quadMatrix` pour passer les sommets en monde ; `PQ.subdivision` / `meshVertMin/Max`. Un vaisseau posé stocke `Vessel.latitude/longitude/altitude` + `Landed`.
@@ -125,16 +183,20 @@ API utile (vérifiée) : `PQS.quads` (`PQ[]`) + `PQS.normalUpdateList` pour énu
 La zone plate autour du mémorial Niel Armstrong est aplanie par un **`PQSMod_FlattenArea`** (le `PQSCity` voisin ne fait que poser l'objet + gérer le LOD, il ne touche **pas** la hauteur). Les configs des corps stock ne sont pas en texte (construites en code/assets binaires), mais la **mécanique** de la classe est exactement la nôtre. Logique débruitée :
 
 ```csharp
+// OnSetup : flattenToRadius = sphere.radius + flattenTo ; angleQuadInclusion = angleOuter * 2 (≠ bord de zone !)
+
 // Court-circuit spatial au niveau quad (OnQuadPreBuild) :
 testAngle = Acos(dot(quad.positionPlanetRelative, posNorm)); // distance angulaire au centre
-quadActive = testAngle < angleQuadInclusion;                 // quad hors zone → désactivé
+quadActive = testAngle < angleQuadInclusion;                 // = 2×angleOuter (marge généreuse)
 
 // Aplanissement par sommet (OnVertexBuildHeight) :
-if (!quadActive) return;                          // saute tout le quad si loin
+if (!overrideQuadBuildCheck && !quadActive) return;   // barrière quad (sautée si override)
 testAngle = Acos(dot(vbData.directionFromCenter, posNorm));
-if (testAngle >= angleOuter) return;              // au-delà de l'anneau externe : intact
-if (testAngle < angleInner) {                     // zone interne : aplanissement franc
-    vbData.vertHeight = flattenToRadius;          // ← hauteur cible ABSOLUE
+if (testAngle >= angleQuadInclusion) return;          // 1er cutoff sommet : 2×angleOuter
+// ... effets de bord entre angleOuter et angleQuadInclusion (removeScatter, debug colors) ...
+if (testAngle >= angleOuter) return;                  // 2e cutoff : au-delà de l'anneau → intact
+if (testAngle < angleInner) {                         // zone interne : aplanissement franc
+    vbData.vertHeight = flattenToRadius;              // ← hauteur cible ABSOLUE
     return;
 }
 // anneau intermédiaire : lissage CubicHermite (le falloff)
@@ -142,7 +204,7 @@ aDelta = (testAngle - angleInner) / angleDelta;
 vbData.vertHeight = CubicHermite(flattenToRadius, vbData.vertHeight, smoothStart, smoothEnd, aDelta);
 ```
 
-Ça valide notre design point par point : hook `OnVertexBuildHeight` (jamais le mesh) ; court-circuit spatial **angulaire** au niveau quad (plus élégant qu'une boîte englobante sur une sphère) ; **cible absolue** (`flattenToRadius`, calculée une fois dans `OnSetup`) ; bords francs = brancher `angleInner = angleOuter` (pas d'anneau Hermite). Pour une zone **ronde**, FlattenArea est carrément le modèle direct : rayon en mètres → angle = `rayon / body.Radius`.
+Ça valide notre design point par point : hook `OnVertexBuildHeight` (jamais le mesh) ; court-circuit spatial **angulaire** au niveau quad (plus élégant qu'une boîte englobante sur une sphère) ; **cible absolue** (`flattenToRadius`, calculée une fois dans `OnSetup`) ; bords francs = brancher `angleInner = angleOuter` (pas d'anneau Hermite). ⚠️ **Précisions 2026-06-24 (lecture exacte de `PQSMod_FlattenArea.cs`) :** (1) il y a **deux** cutoffs sommet — `angleQuadInclusion = 2×angleOuter` puis `angleOuter` — donc `angleQuadInclusion` n'est **pas** le bord de zone ; (2) la barrière `!quadActive` est conditionnée par `!overrideQuadBuildCheck` (c'est précisément ce que notre PQSMod custom court-circuite) ; (3) entre `angleOuter` et `angleQuadInclusion` la hauteur est laissée intacte mais des effets de bord (`removeScatter`, couleurs debug) s'appliquent. Pour une zone **ronde**, FlattenArea est carrément le modèle direct : rayon en mètres → angle = `rayon / body.Radius`.
 
 Notre PQSMod custom ≈ **une pile de `FlattenArea` rejouées dans l'ordre**. Ce qu'on **ajoute** au stock : le filtre d'éligibilité « delta < max » (le stock aplanit *tout* dans le rayon, quelle que soit la pente) et le **fold de N actions** au lieu d'une seule.
 
