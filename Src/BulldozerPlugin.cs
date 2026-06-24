@@ -138,12 +138,39 @@ namespace com.github.lhervier.ksp.bulldozermod
             BulldozerScenario.Instance.AddAction(action);
             LOGGER.LogInfo($"Recorded action on {body.name} lat={lat:F5} lon={lon:F5} flattenTo={action.flattenTo:F2}");
 
+            PrepareVesselForReseat(vessel, body);
+
             // Save to the dedicated file (the new action is serialized via the scenario's OnSave), then
             // reload focusing the same vessel. The scenario's OnLoad applies the flatten before KSP seats it.
             int focusIdx = FlightGlobals.Vessels.IndexOf(vessel);
             Game game = HighLogic.CurrentGame.Updated();
             GamePersistence.SaveGame(game, ReloadSaveName, HighLogic.SaveFolder, SaveMode.OVERWRITE);
             FlightDriver.StartAndFocusVessel(ReloadSaveName, focusIdx);
+        }
+
+        // Makes KSP re-seat AND re-level the vessel on the freshly-flattened terrain at reload, instead of it
+        // reappearing at its old (above-flat, tilted) pose and dropping/toppling. Two save fields drive this:
+        //
+        //   - PQSMin/PQSMax = 0: GoOffRails compares the saved PQS subdivision levels to the body's current ones
+        //     to decide skipGroundPositioning. Zeroing them (the same sentinel KSP itself writes for spawned
+        //     vessels) forces skipGroundPositioning = false, so CheckGroundCollision raycasts down from +5000 m
+        //     and seats the vessel on the flat mesh at the right altitude, regardless of the saved altitude.
+        //
+        //   - srfRelRotation: only this attitude is persisted, and CheckGroundCollision's re-orientation term
+        //     collapses to identity on flat ground (it recomputes terrainNormal from the same flat surface the
+        //     raycast hits), so it KEEPS whatever attitude we load. We therefore pre-level it here: align the
+        //     vessel's up with the local radial (the flat-ground normal), keeping heading. Writing the field
+        //     directly (no SetRotation) avoids jolting live physics; SaveGame is synchronous so no per-frame
+        //     update overwrites it before the snapshot.
+        private static void PrepareVesselForReseat(Vessel vessel, CelestialBody body)
+        {
+            Vector3d radialUp = (vessel.GetWorldPos3D() - body.position).normalized;
+            Quaternion levelWorld = Quaternion.FromToRotation(vessel.vesselTransform.up, (Vector3)radialUp)
+                                    * vessel.vesselTransform.rotation;
+            vessel.srfRelRotation = Quaternion.Inverse(body.bodyTransform.rotation) * levelWorld;
+
+            vessel.PQSminLevel = 0;
+            vessel.PQSmaxLevel = 0;
         }
 
         private void Noop()
