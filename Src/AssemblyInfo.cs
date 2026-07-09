@@ -1,6 +1,5 @@
 using System.Reflection;
 
-[assembly: AssemblyTitle("BulldozerMod")]
 [assembly: AssemblyDescription("Mod for KSP to level (flatten) the terrain around a rover")]
 [assembly: AssemblyConfiguration("")]
 [assembly: AssemblyCompany("")]
