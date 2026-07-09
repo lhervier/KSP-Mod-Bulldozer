@@ -6,11 +6,24 @@ using com.github.lhervier.ksp.bulldozermod.persistence;
 namespace com.github.lhervier.ksp.bulldozermod.terrain
 {
     /// <summary>
-    /// Applies levelling actions to the PQS terrain by injecting stock PQSMod_FlattenArea mods.
+    /// Injects stock PQSMod_FlattenArea mods into the bodies' PQS so the terrain builds flat.
+    ///
+    /// CRITICAL: we do NOT rebuild the PQS ourselves. Rebuilding a LIVE sphere (RebuildSphere/ResetAndWait)
+    /// while the active vessel sits on it is the documented dead-end — the vessel "holds" its tile so the quad
+    /// under it is not rebuilt (a bump remains), neighbours rebuild partially (holes/cracks), and the result
+    /// is incoherent. Instead we follow the stock / Kopernicus / Kerbal Konstructs pattern: have our mods
+    /// present in the PQS mod list BEFORE the sphere builds. KSP itself rebuilds the active body's PQS at
+    /// every flight load — FlightDriver -> PSystemSetup.SetPQSActive -> pqs.ForceStart() — while the vessel is
+    /// still PACKED (cold, no tile held). ForceStart re-runs SetupMods, which collects + OnSetup's our child
+    /// mods, so the quads build flat from the start. The vessel then seats on the already-flat terrain and
+    /// CheckGroundCollision levels it on the flat (radial) normal by itself.
+    ///
+    /// => This must therefore run BEFORE SetPQSActive, i.e. from the scenario's OnLoad (during the loading
+    /// screen), NOT from a flight addon that wakes up after the vessel is already seated.
     ///
     /// Because celestial bodies persist for the whole KSP session (DontDestroyOnLoad), our mods would leak
-    /// from one save to another. The contract is therefore: ApplyActions PURGES all of our mods from every
-    /// body first, then replays only the given actions. Call it once per save load.
+    /// from one save to another, so we PURGE all of our mods from every body first, then inject only the
+    /// given actions. Call once per save load (incl. saves with 0 actions, to clear leaked deformations).
     /// </summary>
     public static class TerrainLeveler
     {
@@ -28,32 +41,38 @@ namespace com.github.lhervier.ksp.bulldozermod.terrain
         private const double RingWidth = 300.0;
 
         /// <summary>
-        /// Brings every body to the deformation state described by <paramref name="actions"/> : removes all
-        /// of our flatten mods from every body (kills cross-save leaks), re-injects one per action, then
-        /// rebuilds the touched bodies so both the mesh AND GetSurfaceHeight reflect the result.
+        /// Purges all of our flatten mods from every body (kills cross-save leaks), injects one
+        /// PQSMod_FlattenArea per action, then ResetAndWait()s the touched bodies.
+        ///
+        /// The reset is required: KSP's ForceStart (StartSphere force:true) does NOT rebuild already-built
+        /// quads, so quads built before our injection stay natural (the under-rover quad becomes a bump while
+        /// freshly-built neighbours come out flat -> patchwork + cracks). ResetSphere destroys all quads so the
+        /// following build (KSP's ForceStart, or our wait-coroutine) rebuilds them ALL fresh with our mod.
+        ///
+        /// We use ResetAndWait (not RebuildSphere): it resets, then WAITS until the sphere is alive before
+        /// building, so it can't bail out early. Called from OnLoad (loading screen) the rebuild runs while the
+        /// vessel is still PACKED, so the under-vessel quad is rebuilt cold (no "vessel holds its tile" bump).
         /// </summary>
-        public static void ApplyActions(IList<BulldozerAction> actions)
+        public static void InjectActions(IList<BulldozerAction> actions)
         {
             HashSet<CelestialBody> touched = new HashSet<CelestialBody>();
 
-            // 1. Purge our mods everywhere. DestroyImmediate so they are gone before the rebuild re-collects.
+            // 1. Purge our mods everywhere. DestroyImmediate so they are gone before the next SetupMods collect.
             foreach (CelestialBody body in FlightGlobals.Bodies)
             {
                 if (body.pqsController == null)
                 {
                     continue;
                 }
-                foreach (PQSMod_FlattenArea f in body.pqsController.GetComponentsInChildren<PQSMod_FlattenArea>(true))
+                foreach (BulldozerFlattenMod f in body.pqsController.GetComponentsInChildren<BulldozerFlattenMod>(true))
                 {
-                    if (f.gameObject.name == FlattenGoName)
-                    {
-                        Object.DestroyImmediate(f.gameObject);
-                        touched.Add(body);
-                    }
+                    Object.DestroyImmediate(f.gameObject);
+                    touched.Add(body);
                 }
             }
 
-            // 2. Replay the current save's actions.
+            // 2. Inject the current save's actions as child mods (collected + OnSetup'd by the next build).
+            int injected = 0;
             foreach (BulldozerAction a in actions)
             {
                 CelestialBody body = FlightGlobals.GetBodyByName(a.bodyName);
@@ -62,51 +81,38 @@ namespace com.github.lhervier.ksp.bulldozermod.terrain
                     LOGGER.LogWarning($"Skipping action on unknown/PQS-less body '{a.bodyName}'");
                     continue;
                 }
-                InjectFlattenArea(body, a.lat, a.lon, a.flattenTo, a.radius);
+                InjectFlattenMod(body, a.lat, a.lon, a.flattenTo, a.radius);
                 touched.Add(body);
+                injected++;
             }
 
-            // 3. Rebuild every touched body. RebuildSphere re-runs SetupMods (refreshing the mods array, so
-            //    no stale/destroyed references remain) and rebuilds the quads of the active body.
+            // 3. Reset touched bodies so EVERY quad rebuilds fresh with the current mod set. Cold, because we
+            //    run in OnLoad while the vessel is still packed.
             foreach (CelestialBody body in touched)
             {
-                body.pqsController.RebuildSphere();
+                body.pqsController.ResetAndWait();
             }
 
-            LOGGER.LogInfo($"Applied {actions.Count} action(s); rebuilt {touched.Count} body(ies)");
+            LOGGER.LogInfo($"Injected {injected} flatten mod(s); reset {touched.Count} body(ies) for cold rebuild");
         }
 
-        // Builds a stock PQSMod_FlattenArea on a child GameObject of the body's PQS. It must be a child:
+        // Builds our custom BulldozerFlattenMod on a child GameObject of the body's PQS. It must be a child:
         // SetupMods()/GetChildMods() collect PQSMods from the PQS hierarchy's children at rebuild time.
-        private static void InjectFlattenArea(CelestialBody body, double lat, double lon, double flattenTo, double radius)
+        private static void InjectFlattenMod(CelestialBody body, double lat, double lon, double flattenTo, double radius)
         {
             GameObject go = new GameObject(FlattenGoName);
             go.transform.SetParent(body.pqsController.transform, false);
 
-            PQSMod_FlattenArea flatten = go.AddComponent<PQSMod_FlattenArea>();
+            BulldozerFlattenMod flatten = go.AddComponent<BulldozerFlattenMod>();
             flatten.sphere = body.pqsController;
             flatten.modEnabled = true;
             flatten.order = 1000;            // run after the height-generating mods so it overrides them
 
-            // Centre on the vessel via lat/lon (OnSetup resolves the position vector; confirmed correctly
-            // centred on Kerbin/Mun/Minmus/Eve).
-            flatten.useLatLon = true;
-            flatten.bodyName = body.name;
-            flatten.body = body;
             flatten.lat = lat;
             flatten.lon = lon;
-            flatten.alt = flattenTo;         // used only to place the centre point
-
-            // Absolute target height : OnSetup turns it into flattenToRadius = sphere.radius + flattenTo.
-            flatten.flattenTo = flattenTo;
-
-            // Flat disk of `radius`, surrounded by a smooth blend ring (inner..outer) that ramps back to
-            // the surrounding height instead of a vertical (see-through) cliff. smoothStart/End = 0 give
-            // flat tangents at both ends -> a clean S-curve.
-            flatten.innerRadius = radius;
-            flatten.outerRadius = radius + RingWidth;
-            flatten.smoothStart = 0.0;
-            flatten.smoothEnd = 0.0;
+            flatten.flattenTo = flattenTo;   // absolute target altitude (ASL)
+            flatten.radius = radius;         // flat disk radius
+            flatten.ringWidth = RingWidth;   // smooth blend ring outside the disk
         }
     }
 }
