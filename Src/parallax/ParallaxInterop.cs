@@ -49,28 +49,25 @@ namespace com.github.lhervier.ksp.bulldozermod.parallax
         }
 
         /// <summary>
-        /// Adds a configured exclusion decal to <paramref name="host"/>. The caller owns the GameObject and
-        /// must parent it under the body's PQS BEFORE the sphere builds — the decal registers itself per quad
-        /// in OnQuadPreBuild.
+        /// Adds an exclusion decal to <paramref name="host"/>, centered on <paramref name="position"/>. The
+        /// caller owns the GameObject, must parent it under the body's PQS BEFORE the sphere builds, and
+        /// must set the mask (<c>colorMap</c>) before the terrain is built.
         /// </summary>
         /// <param name="position">Direction from the body center (body frame, not world).</param>
         /// <param name="radius">Footprint radius in meters — the decal's reach, NOT the cleared radius.</param>
         /// <param name="order">PQSMod order.</param>
-        /// <param name="mask">Mask sampled in the compute shader: red &lt; 0.5 blocks the scatter.</param>
         /// <param name="blockedScatters">Scatter names to block, in Parallax's "Body-Name" form.</param>
-        public static PQSMod_MapDecalVertexRemoveScatter AddDecal(GameObject host, Vector3d position, double radius,
-                                                                  int order, Texture2D mask,
-                                                                  List<string> blockedScatters)
+        public static BulldozerScatterDecal AddDecal(GameObject host, Vector3d position, double radius,
+                                                     int order, List<string> blockedScatters)
         {
-            // Our subclass, not Parallax's own type: its quad inclusion test returns NaN for the quad right
-            // under the decal, which is precisely the one we need. See BulldozerScatterDecal.
+            // Our subclass, not Parallax's own type: it attaches to a single quad, and its quad inclusion
+            // test survives a decal sitting exactly on a quad center. See BulldozerScatterDecal.
             BulldozerScatterDecal decal = host.AddComponent<BulldozerScatterDecal>();
             decal.preciseDirection = position;
 
             decal.position = (Vector3)position;
             decal.radius = radius;
             decal.angle = 0f;
-            decal.colorMap = mask;
             decal.blockedScatters = blockedScatters;
             decal.order = order;
             decal.modEnabled = true;

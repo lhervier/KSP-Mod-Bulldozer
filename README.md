@@ -93,6 +93,54 @@ double w = (v.z * body.Radius / decal.radius + 1.0) * 0.5;
 // -> pixel (u * size, w * size), au flip vertical près selon la convention de SetPixels32 (à vérifier à l'implémentation)
 ```
 
+### Architecture : un decal par quad
+
+**Décidée le 2026-08-24, en remplacement du « un decal par zone ».** Le decal n'est plus posé sur le vaisseau mais **au centre du quad-feuille**, et il ne s'attache **qu'à ce quad-là**. La zone à nettoyer, elle, est dessinée dans son masque à la position réelle du vaisseau.
+
+Ce que ça change :
+
+- **La fusion devient un lookup.** Un quad a un decal ou il n'en a pas. Nettoyer une zone = pour chaque quad touché, compléter son masque s'il existe, en créer un sinon. Plus d'algorithme de fusion de zones.
+- **Nos decals ne se gênent plus jamais**, quel que soit le nombre de chantiers ou leur proximité : la relation devient 1 pour 1.
+- En contrepartie, **une zone à cheval crée plusieurs decals**, un par quad touché, chacun portant sa portion du disque. C'est mécanique, et c'est exactement le même code que la fusion — une seule fonction « dessiner un disque (lat/lon, rayon) dans le masque de ce quad ».
+
+**Ce qui rend l'architecture possible** : `BulldozerScatterDecal` **override `OnQuadPreBuild`**. Sans ça, un decal de ~700 m de rayon capturerait tout un cône de 2,8 km (le ×4) et empêcherait les decals voisins de s'enregistrer — le problème serait juste déplacé. Notre override refuse tout quad qui n'est pas le sien :
+
+```csharp
+if (quad.subdivision != sphere.maxLevel) return;   // seuls les quads-feuilles portent des scatters
+if (AngleTo(quad) > CenterTolerance) return;       // et seulement CELUI dont je suis le centre
+```
+
+Deux conséquences à ne pas perdre de vue :
+
+- le decal étant **exactement** au centre de son quad, l'angle vaut zéro : le clamp avant `Acos` (§5, PIÈGE 1) n'est plus un correctif de confort, c'est **la condition de fonctionnement** ;
+- on ne peut pas retenir la référence `PQ` (les quads sont détruits et recréés sans cesse) : un decal identifie son quad par la **position de son centre**, à quelques mètres près.
+
+**Le test « ce quad est-il touché ? » est exact**, sans marge : le centre du disque est projeté dans le repère tangent local (axes est/nord pris sur les voisins du quad), ce qui ramène le problème à une distance point-rectangle classique. La courbure introduit une erreur millimétrique sur ~740 m — négligeable. Repli conservateur (demi-diagonale + rayon) uniquement quand le quad n'a aucun voisin exploitable, au bord d'une face de cube.
+
+*Une version antérieure utilisait ce repli partout : elle sélectionnait un quad voisin dès que son centre était à moins de 543 m, alors qu'un disque de 20 m ne franchit la frontière que si celle-ci est à moins de 20 m. Un nettoyage à 317 m du centre de son quad créait ainsi 2 decals au lieu d'un — un masque de 4 Mo pour rien.*
+
+**Les quads impactés sont calculés au clic, pas au chargement.** Au moment de l'injection (`OnLoad`), les quads n'existent pas encore et leur géométrie n'est pas reconstructible sans réimplémenter la projection cube→sphère du PQS. On profite donc du clic, où le vaisseau est en vol et les quads bien présents, pour relever le **centre (lat/lon) de chaque quad touché** et le stocker dans l'action. C'est stable d'un chargement à l'autre tant que le preset de détail ne change pas (`maxLevel` est donc stocké avec).
+
+### PIÈGE — un quad n'a ni la taille qu'on croit, ni la forme qu'on croit
+
+Deux erreurs successives, toutes deux mesurées en jeu sur la Mun (`maxLevel = 9`, formule : 614 m) :
+
+| Position | Arêtes réelles | Rapport à la formule |
+|---|---|---|
+| Pôle (centre d'une face) | **781 m** | ×1,27 — le maximum, soit 4/π |
+| Équateur | **741 m** | ×1,21 |
+| 45° (bord de face) | **313 × 478 m** | ×0,5 à ×0,78 — **et non carré** |
+
+1. **La taille ne se calcule pas.** `(π/2 × R) / 2^maxLevel` suppose des quads uniformes **en angle** ; le PQS est un cube projeté, ils sont uniformes sur le **plan de la face**. *Conséquence vécue : la recherche de quads, calibrée sur la formule, n'en trouvait **aucun** alors que le vaisseau était au coin de quatre d'entre eux.*
+2. **Un quad n'est pas carré.** Au bord d'une face, l'échelle vaut `1/(1+t²)` radialement mais `1/√(1+t²)` transversalement — un rapport de **1,41 à 45°**. Moyenner les deux axes ferait tester un carré que le quad n'a pas, avec le risque de **manquer** un quad réellement touché.
+
+D'où `QuadLocator.MeasureQuadEdges`, qui mesure **les deux axes séparément** sur les voisins (`PQ.east/west` et `north/south`). La demi-diagonale qui en découle **voyage dans l'action** (`quadHalfDiag`) : au chargement il n'y a aucun quad à mesurer, et c'est elle qui dimensionne l'emprise du decal.
+
+### Règles de refus
+
+- **Rayon < 5 m** : refusé. À ~0,7 m/pixel, un disque plus petit ne serait plus qu'une poignée de pixels.
+- **Quad déjà possédé par un autre mod** : refusé, en nommant la zone. Vérifié **au clic** — `maskedScattersPerQuad` est déjà peuplé en vol — donc sans rechargement inutile. En pratique un seul cas existe dans tout `GameData` : **`ParallaxMaskKSC`** (Kerbin, rayon 1400 m, portée 5,6 km). Ni les autres sites de lancement, ni le mémorial Armstrong (qui a bien ses rochers) n'ont de decal d'exclusion.
+
 ### Contraintes
 
 - **Zone circulaire**, rayon **20 m** (en dur pour l'instant, cf. « Ce qui reste à faire »), centrée sur le vaisseau.
@@ -116,12 +164,26 @@ Le squelette de persistance et d'application « à froid » a été conservé ; 
 
 | Fichier | Rôle |
 |---|---|
-| `Src/BulldozerCleanModule.cs` | `PartModule` : entrée PAW **« Clear scatters »**, enregistre l'action puis save+reload. Posé sur tout module de commande par `GameData/BulldozerMod/BulldozerMod.cfg` (patch MM) — provisoire, la vraie pièce sera une lame |
-| `Src/parallax/ParallaxInterop.cs` | Tout ce qu'on fait avec Parallax : pose du PQSMod d'exclusion, liste des scatters d'un corps, purge du registre statique. **Compilé contre `ParallaxContinued.dll`** (référence dans le `.csproj`) : une évolution de son API casse le build, pas le vol |
-| `Src/terrain/ScatterCleaner.cs` | Purge nos decals (anti-fuite inter-saves) → injecte un decal par action → `ResetAndWait` des corps touchés |
-| `Src/terrain/ScatterMask.cs` | Génère le masque (`Texture2D` 1024², disque noir sur fond blanc) **et** calcule l'emprise du decal à partir de la taille des quads (voir « Les deux rayons » au §2) |
-| `Src/persistence/BulldozerAction.cs` | Une action `{ body, lat, lon, radius }` |
+| `Src/BulldozerCleanModule.cs` | `PartModule` : entrée PAW **« Clear scatters »**. Relève les quads impactés, applique les règles de refus, enregistre l'action puis save+reload. Posé sur tout module de commande par `GameData/BulldozerMod/BulldozerMod.cfg` (patch MM) — provisoire, la vraie pièce sera une lame |
+| `Src/parallax/ParallaxInterop.cs` | Tout ce qu'on fait avec Parallax : pose du decal, liste des scatters d'un corps, purge du registre statique. **Compilé contre `ParallaxContinued.dll`** : une évolution de son API casse le build, pas le vol |
+| `Src/parallax/BulldozerScatterDecal.cs` | Le decal lui-même : sous-classe du PQSMod de Parallax, **attachée à un seul quad** (celui dont elle occupe le centre) |
+| `Src/terrain/QuadLocator.cs` | Géométrie des quads : arête, demi-diagonale, et **quels quads-feuilles un disque touche** (en vol uniquement) |
+| `Src/terrain/ScatterMask.cs` | Le masque d'un decal (`Texture2D` 2048² en R8) et la projection lat/lon → pixel ; `DrawDisk` sert aussi bien à créer qu'à fusionner |
+| `Src/terrain/ScatterCleaner.cs` | Purge nos decals, **regroupe les disques par quad** (un decal chacun), `ResetAndWait` des corps touchés |
+| `Src/persistence/BulldozerAction.cs` | Une action `{ body, lat, lon, radius, maxLevel, QUAD* }` |
 | `Src/persistence/BulldozerScenario.cs` | `ScenarioModule` (`AddToAllGames`) : source de vérité par save ; son `OnLoad` déclenche l'injection |
+| `Src/diagnostics/QuadOverlay.cs` | **Outil de test** : affichage en vol des quads voisins (MOD+B) — voir ci-dessous |
+| `Src/diagnostics/BulldozerScatterDiagnostic.cs` | **Outil de test** : dump complet de la chaîne dans `KSP.log`, 8 s après l'entrée en vol |
+
+### Se placer sur une limite de quad (`QuadOverlay`)
+
+Ouvert avec **MOD+B** en vol (MOD = shift droit sous Windows). Il liste les **4 quads-feuilles les plus proches**, avec la distance du vaisseau à leur **centre** et leur propriétaire éventuel :
+
+- deux distances égales ⇒ le vaisseau est sur **l'arête** entre ces deux quads ;
+- quatre distances égales ⇒ il est sur le **coin** où quatre quads se rejoignent ;
+- la ligne `spread` donne directement l'écart entre la plus petite et la plus grande — la faire tendre vers 0 revient à se placer au coin.
+
+La dernière ligne annonce combien de quads un nettoyage toucherait à cet endroit : c'est le nombre de decals qui seraient créés, donc la valeur à surveiller pour tester un nettoyage à cheval.
 
 **Supprimés** : `BulldozerFlattenMod` (le PQSMod de nivellement), `TerrainLeveler`, `BulldozerPlugin` (bouton toolbar, remplacé par le PAW) et `BulldozerDiagnosticPlugin` (dump d'altitudes mesh vs analytique, sans objet maintenant).
 
@@ -141,6 +203,7 @@ Question ouverte mineure : le nom « Bulldozer » n'est plus tout à fait juste 
 >     Kerbin-Roses:       readBlockMap=True
 >     Kerbin-OakTree:     readBlockMap=True   ...
 > ```
+> ✅ **Architecture « un decal par quad » validée le 2026-08-24** : nettoyages multiples dans une même partie, y compris à cheval sur quatre quads, chacun recevant son decal et sa portion de disque. La fusion (deux zones sur un même quad) passe par le même chemin.
 > ✅ **Rayon vérifié à la mesure** : kerbal en EVA, vaisseau pris pour cible, la frontière de l'herbe haute tombe à **19,9 m** pour 20 m demandés. La bordure est franche — cohérent avec un masque à 0,63 m/pixel sur Kerbin (emprise 325 m étalée sur 1024 px).
 
 Sont donc **acquis, en jeu et non plus seulement par lecture de source** : l'exclusion de scatters sans toucher au relief ; l'instanciation du PQSMod hors Kopernicus, injecté depuis `OnLoad` avant le build à froid ; le masque `Texture2D` **généré en code** et lu par le compute shader ; la liste complète des scatters d'un corps via `ConfigLoader.parallaxScatterBodies[...].fastScatters` ; la persistance par event-sourcing et le save+reload sur une save dédiée.
@@ -193,15 +256,14 @@ Le nom déclaré est **`Parallax`** — celui du `[KSPAssembly]` de Parallax, pa
 
 ## 6. Ce qui reste à faire
 
-- **Plusieurs nettoyages par partie** : aujourd'hui un seul, car deux decals se disputeraient les mêmes quads (voir plus bas). Il faut **fusionner dans un seul decal par chantier** et enrichir son masque à chaque passe.
 - **Rayon paramétrable** côté joueur, puis la **pièce dédiée** (lame lourde, consommable après une maille) à la place du patch sur les modules de commande.
-- **Retirer le diagnostic** `Src/diagnostics/BulldozerScatterDiagnostic.cs` — le rayon est validé, il ne sert plus qu'en cas de régression.
-- **Détail terrain : exigence probablement caduque, à confirmer.** On voulait imposer le preset maximum, d'abord pour la finesse (elle vient de la texture, pas du maillage : sans objet), puis parce que la taille des quads en dépend. Or `ScatterMask.FootprintRadius` calcule déjà l'emprise depuis `sphere.maxLevel` **réel**, donc le mod s'adapte au preset ; et les actions étant stockées en lat/lon absolus, le rejeu ne dépend pas du maillage. Reste à vérifier qu'aucune autre dépendance ne subsiste — si non, l'exigence tombe (levier si besoin : `PQSCache.PresetList.presetIndex == PQSCache.PresetList.presets.Count - 1`).
+- **Retirer les outils de test** (`Src/diagnostics/`) : `BulldozerScatterDiagnostic` et `QuadOverlay` ne servent plus qu'en cas de régression.
+- **Détail terrain : exigence caduque.** On voulait imposer le preset maximum, d'abord pour la finesse (elle vient de la texture, pas du maillage : sans objet), puis parce que la taille des quads en dépend. Les deux raisons sont tombées : l'arête est **mesurée en vol** et voyage dans l'action, et un changement de preset est détecté par la garde `maxLevel` (l'action est alors ignorée avec un avertissement, plutôt qu'appliquée de travers). Reste à décider ce qu'on fait de ces actions orphelines — les recalculer à la première occasion en vol serait plus élégant que de les abandonner.
 - **Bords de zone** : coupure franche ou dégradé dans le masque (le sampler est bilinéaire, un masque adouci suffirait).
 
 ### Contraintes toujours valables
 
-**Un seul decal par quad.** Le refus est explicite côté Parallax (« *Multiple MapDecalVertexRemoveScatter mods on the same quad! You must combine these decals into one* ») et **silencieux** : le second decal est simplement ignoré sur les quads déjà pris. Comme l'emprise vaut 4× le rayon et se compare au **centre** des quads, deux decals se gênent jusqu'à ~2,6 km d'écart sur Kerbin. D'où la fusion à coder avant tout second nettoyage.
+**Un seul decal par quad.** Le refus est explicite côté Parallax (« *Multiple MapDecalVertexRemoveScatter mods on the same quad! You must combine these decals into one* ») et **silencieux** : le second decal est ignoré sur les quads déjà pris. C'est précisément ce que l'architecture « un decal par quad » neutralise pour nos propres decals — mais la règle continue de s'appliquer face aux decals des **autres mods**, d'où le refus au clic (`ParallaxMaskKSC`).
 
 **Le rayon du decal n'est pas le rayon nettoyé** (voir §2) : l'emprise doit rester calibrée sur la taille des quads.
 

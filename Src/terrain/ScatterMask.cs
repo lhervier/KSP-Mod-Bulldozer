@@ -1,80 +1,123 @@
 using System;
 using UnityEngine;
+using com.github.lhervier.ksp.shared;
 
 namespace com.github.lhervier.ksp.bulldozermod.terrain
 {
     /// <summary>
-    /// Builds the mask textures handed to Parallax's exclusion decal, and computes the decal footprint
-    /// that goes with them.
+    /// The mask texture handed to one exclusion decal, plus the projection that turns surface coordinates
+    /// into pixels of that texture.
     ///
-    /// Mask convention (read in TerrainScatters.compute): the RED channel is sampled at the candidate
-    /// position and a value &lt; 0.5 blocks the scatter. So white = keep, black = clear.
+    /// Convention read by TerrainScatters.compute: the RED channel is sampled at the candidate position and
+    /// a value &lt; 0.5 blocks the scatter. So 255 = keep the scatter, 0 = clear it.
+    ///
+    /// The mask covers a SQUARE of 2 x decalRadius, centered on the decal and oriented by the decal's `rot`
+    /// (see "Le repère du masque" in the README). It is NOT aligned with the quad.
     /// </summary>
-    public static class ScatterMask
+    public class ScatterMask
     {
-        // Mask resolution. 1024 over a ~650 m footprint is sub-meter per pixel, plenty for a 20 m disk.
-        // RGBA32 costs 4 MB per body; TextureFormat.R8 would cut that to 1 MB if it ever matters (the
-        // shader only reads .r), but RGBA32 is the safest bet for a first run.
-        private const int MaskSize = 1024;
+        private static readonly ModLogger LOGGER = new ModLogger("Mask");
 
-        /// <summary>
-        /// Footprint radius (m) to give the decal on this sphere. This is NOT the cleared radius.
-        ///
-        /// The decal only attaches to a quad when the angle between the decal and the quad's CENTER is below
-        /// atan(radius / sphereRadius) * 4. A quad is hundreds of meters wide, so a footprint sized like the
-        /// cleared area (say 20 m) would attach to no quad at all and silently do nothing. The footprint must
-        /// therefore be scaled to the quad, not to the request.
-        /// </summary>
-        public static double FootprintRadius(PQS sphere, double clearRadius)
+        // 2048 over a ~1.4 km footprint is ~0.7 m/pixel: a 5 m disk (our minimum) still spans ~14 px.
+        // R8 rather than RGBA32 because the shader only reads .r — 4 MB per quad instead of 16.
+        private const int MaskSize = 2048;
+
+        private const byte Keep = 255;
+        private const byte Clear = 0;
+
+        private readonly byte[] _pixels;
+        private readonly Texture2D _texture;
+
+        /// <summary>Half-width (m) of the square the mask covers; also the decal's radius.</summary>
+        public double DecalRadius { get; private set; }
+
+        /// <summary>The texture to hand to the decal. Kept in sync by <see cref="DrawDisk"/>.</summary>
+        public Texture2D Texture
         {
-            // A PQS face spans 90 deg and is split into 2^maxLevel quads per side.
-            double quadEdge = (Math.PI * 0.5 * sphere.radius) / Math.Pow(2.0, sphere.maxLevel);
-            double quadHalfDiagonal = quadEdge * 0.70710678;
+            get { return _texture; }
+        }
 
-            // Attachment needs footprint > quadHalfDiagonal / 4; half the half-diagonal keeps a x2 margin
-            // while staying small enough for a sharp mask. The clearRadius term only matters for absurdly
-            // large requests, where the cleared disk must still fit inside the footprint.
-            return Math.Max(quadHalfDiagonal * 0.5, clearRadius * 4.0);
+        /// <summary>Creates an all-keep mask (nothing cleared yet) for a decal of the given radius.</summary>
+        public ScatterMask(double decalRadius)
+        {
+            DecalRadius = decalRadius;
+
+            _pixels = new byte[MaskSize * MaskSize];
+            for (int i = 0; i < _pixels.Length; i++)
+            {
+                _pixels[i] = Keep;
+            }
+
+            _texture = new Texture2D(MaskSize, MaskSize, TextureFormat.R8, false);
+            _texture.name = "BulldozerScatterMask";
+
+            // Bilinear + clamp mirrors how the compute shader samples it (linearClampSampler).
+            _texture.filterMode = FilterMode.Bilinear;
+            _texture.wrapMode = TextureWrapMode.Clamp;
+            Apply();
         }
 
         /// <summary>
-        /// Creates a mask clearing a filled disk of <paramref name="clearRadius"/> meters at the center of a
-        /// footprint of <paramref name="footprintRadius"/> meters.
+        /// Clears a disk of <paramref name="radius"/> meters centered on the given surface direction.
+        ///
+        /// <paramref name="rot"/> must be the decal's own rotation — the very one the shader uses. It
+        /// already encodes where the decal sits, so no separate center is needed.
         /// </summary>
-        public static Texture2D CreateDiskMask(double footprintRadius, double clearRadius)
+        public void DrawDisk(Quaternion rot, double bodyRadius, Vector3d diskDirection, double radius)
         {
-            Texture2D mask = new Texture2D(MaskSize, MaskSize, TextureFormat.RGBA32, false);
-            mask.name = "BulldozerScatterMask";
+            // Same projection as the shader: rotate into the decal frame, then map [-R, +R] onto [0, 1].
+            Vector3 rotated = rot * (Vector3)diskDirection;
+            double u = (rotated.x * bodyRadius / DecalRadius + 1.0) * 0.5;
+            double v = (rotated.z * bodyRadius / DecalRadius + 1.0) * 0.5;
 
-            // Bilinear + clamp mirrors how the compute shader samples it (linearClampSampler): clamping keeps
-            // the "keep scatters" border value valid for anything sampled outside the mask.
-            mask.filterMode = FilterMode.Bilinear;
-            mask.wrapMode = TextureWrapMode.Clamp;
-
-            // The decal's UV space spans [-footprintRadius, +footprintRadius] on both axes, centered.
-            double pixelsPerMeter = MaskSize / (2.0 * footprintRadius);
-            double radiusPx = clearRadius * pixelsPerMeter;
-            double centerPx = MaskSize * 0.5;
+            // Over ~1.4 km the gnomonic distortion is negligible, so the disk stays a disk in UV space and
+            // only its center needs the full projection.
+            double centerX = u * MaskSize;
+            double centerY = v * MaskSize;
+            double radiusPx = radius / (2.0 * DecalRadius) * MaskSize;
             double radiusPxSq = radiusPx * radiusPx;
 
-            Color32 keep = new Color32(255, 255, 255, 255);
-            Color32 clear = new Color32(0, 0, 0, 255);
+            int minX = Math.Max(0, (int)Math.Floor(centerX - radiusPx));
+            int maxX = Math.Min(MaskSize - 1, (int)Math.Ceiling(centerX + radiusPx));
+            int minY = Math.Max(0, (int)Math.Floor(centerY - radiusPx));
+            int maxY = Math.Min(MaskSize - 1, (int)Math.Ceiling(centerY + radiusPx));
 
-            Color32[] pixels = new Color32[MaskSize * MaskSize];
-            for (int y = 0; y < MaskSize; y++)
+            for (int y = minY; y <= maxY; y++)
             {
-                double dy = (y + 0.5) - centerPx;
+                double dy = (y + 0.5) - centerY;
                 int row = y * MaskSize;
-                for (int x = 0; x < MaskSize; x++)
+                for (int x = minX; x <= maxX; x++)
                 {
-                    double dx = (x + 0.5) - centerPx;
-                    pixels[row + x] = (dx * dx + dy * dy) <= radiusPxSq ? clear : keep;
+                    double dx = (x + 0.5) - centerX;
+                    if (dx * dx + dy * dy <= radiusPxSq)
+                    {
+                        _pixels[row + x] = Clear;
+                    }
                 }
             }
 
-            mask.SetPixels32(pixels);
-            mask.Apply(false, false);
-            return mask;
+            Apply();
+
+            // u/v and the pixel center are what to check first if a cleared area lands somewhere unexpected:
+            // a wrong vertical convention would mirror it around the mask center.
+            LOGGER.LogInfo($"disk r={radius:F0} m -> uv=({u:F4},{v:F4}) px=({centerX:F0},{centerY:F0}) " +
+                           $"rpx={radiusPx:F1} in a {MaskSize}px mask of {2.0 * DecalRadius:F0} m");
+        }
+
+        /// <summary>Frees the GPU/CPU texture. The mask must not be used afterwards.</summary>
+        public void Destroy()
+        {
+            if (_texture != null)
+            {
+                UnityEngine.Object.DestroyImmediate(_texture);
+            }
+        }
+
+        // Raw upload: R8 holds one byte per pixel, in the same order as our buffer.
+        private void Apply()
+        {
+            _texture.LoadRawTextureData(_pixels);
+            _texture.Apply(false, false);
         }
     }
 }

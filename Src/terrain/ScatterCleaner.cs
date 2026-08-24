@@ -7,12 +7,15 @@ using com.github.lhervier.ksp.bulldozermod.persistence;
 namespace com.github.lhervier.ksp.bulldozermod.terrain
 {
     /// <summary>
-    /// Applies the save's cleaning actions by injecting one Parallax exclusion decal per action into the
-    /// bodies' PQS, then resetting the touched spheres so every quad rebuilds with the decals in place.
+    /// Applies the save's cleaning actions: one exclusion decal per impacted leaf quad, each carrying a mask
+    /// where every disk touching that quad has been drawn.
+    ///
+    /// Merging is a lookup, not an algorithm: two actions touching the same quad share its decal and simply
+    /// draw into the same mask.
     ///
     /// Must run from the scenario's OnLoad, i.e. during the loading screen while the vessel is still PACKED:
-    /// the decal registers itself per quad in OnQuadPreBuild, so it has to be in the PQS mod list BEFORE the
-    /// sphere builds. KSP rebuilds the active body's PQS at every flight load (FlightDriver ->
+    /// a decal registers itself in OnQuadPreBuild, so it has to be in the PQS mod list BEFORE the sphere
+    /// builds. KSP rebuilds the active body's PQS at every flight load (FlightDriver ->
     /// PSystemSetup.SetPQSActive -> pqs.ForceStart()), which re-runs SetupMods and collects our child mods.
     ///
     /// Bodies persist for the whole KSP session (PSystemManager is DontDestroyOnLoad), so our decals would
@@ -24,16 +27,20 @@ namespace com.github.lhervier.ksp.bulldozermod.terrain
         private static readonly ModLogger LOGGER = new ModLogger("ScatterCleaner");
 
         // Name of the GameObjects we create, so the purge removes OUR decals only — Parallax ships its own
-        // (the KSC mask, for one) and those must survive untouched.
+        // (the KSC mask) and those must survive untouched.
         private const string DecalGoName = "BulldozerScatterDecal";
 
-        // Matches Parallax's own KSC decal. Anything high works: the exclusion is read by the scatter system
-        // from a per-quad registry, not from the PQSMod ordering.
+        // Matches Parallax's own KSC decal. Anything high works: the exclusion is read from a per-quad
+        // registry, not from the PQSMod ordering.
         private const int DecalOrder = 99999;
 
+        // The decal must cover its whole quad, whose furthest point is one half-diagonal away; the margin
+        // keeps the quad inside the shader's inscribed disk rather than exactly on its edge.
+        private const double FootprintMargin = 1.1;
+
         /// <summary>
-        /// Purges our decals from every body, injects one decal per action, and resets the touched bodies so
-        /// their quads are rebuilt cold with the new mod set.
+        /// Purges our decals from every body, rebuilds one decal per impacted quad, and resets the touched
+        /// bodies so their quads are rebuilt cold with the new mod set.
         /// </summary>
         public static void InjectActions(IList<BulldozerAction> actions)
         {
@@ -44,17 +51,41 @@ namespace com.github.lhervier.ksp.bulldozermod.terrain
             }
 
             HashSet<CelestialBody> touched = new HashSet<CelestialBody>();
-
             Purge(touched);
 
-            int injected = 0;
+            // One decal per (body, quad center). The key rounds the coordinates so the same quad, described
+            // by two different actions, lands on the same decal — that is the whole merge.
+            Dictionary<string, BulldozerScatterDecal> decals = new Dictionary<string, BulldozerScatterDecal>();
+
+            int disks = 0;
             foreach (BulldozerAction action in actions)
             {
-                if (Inject(action))
+                CelestialBody body = FlightGlobals.GetBodyByName(action.bodyName);
+                if (body == null || body.pqsController == null)
                 {
-                    touched.Add(FlightGlobals.GetBodyByName(action.bodyName));
-                    injected++;
+                    LOGGER.LogWarning($"Skipping action on unknown/PQS-less body '{action.bodyName}'");
+                    continue;
                 }
+                if (action.maxLevel != 0 && action.maxLevel != body.pqsController.maxLevel)
+                {
+                    LOGGER.LogWarning($"Action on {body.name} was recorded at maxLevel={action.maxLevel} but " +
+                                      $"the body is now at {body.pqsController.maxLevel} — the terrain detail " +
+                                      "preset changed, its quads no longer match, action skipped");
+                    continue;
+                }
+
+                Vector3d diskDirection = body.GetRelSurfaceNVector(action.lat, action.lon);
+                foreach (Vector3d quad in action.quads)
+                {
+                    BulldozerScatterDecal decal = GetOrCreateDecal(body, quad, action.quadHalfDiagonal, decals);
+                    if (decal == null)
+                    {
+                        continue;
+                    }
+                    decal.mask.DrawDisk(decal.rot, body.Radius, diskDirection, action.radius);
+                    disks++;
+                }
+                touched.Add(body);
             }
 
             // Reset so EVERY quad is rebuilt and runs OnQuadPreBuild again with the current decals. Cold,
@@ -69,7 +100,60 @@ namespace com.github.lhervier.ksp.bulldozermod.terrain
                 }
             }
 
-            LOGGER.LogInfo($"Injected {injected} decal(s); reset {touched.Count} body(ies)");
+            LOGGER.LogInfo($"Injected {decals.Count} decal(s) carrying {disks} disk(s); " +
+                           $"reset {touched.Count} body(ies)");
+        }
+
+        // Returns the decal owning that quad, creating it (with an empty mask) on first use.
+        private static BulldozerScatterDecal GetOrCreateDecal(CelestialBody body,
+                                                              Vector3d quadCenter,
+                                                              double quadHalfDiagonal,
+                                                              Dictionary<string, BulldozerScatterDecal> decals)
+        {
+            // Rounding the direction gives quad centers described by two different actions the same key —
+            // that is the whole merge. 9 decimals on a unit vector is millimetric on any body.
+            string key = $"{body.name}:{quadCenter.x:F9}:{quadCenter.y:F9}:{quadCenter.z:F9}";
+            BulldozerScatterDecal decal;
+            if (decals.TryGetValue(key, out decal))
+            {
+                return decal;
+            }
+
+            PQS sphere = body.pqsController;
+            List<string> blocked = ParallaxInterop.GetScatterNames(body.name);
+            if (blocked.Count == 0)
+            {
+                LOGGER.LogWarning($"No Parallax scatter to block on '{body.name}' — skipping");
+                return null;
+            }
+
+            // The half-diagonal comes from the action (measured in flight). The nominal value is only a
+            // fallback for an action saved before that field existed — quads are not square, so a computed
+            // value is never reliable here.
+            double halfDiagonal = quadHalfDiagonal > 0.0
+                ? quadHalfDiagonal
+                : QuadLocator.NominalQuadEdge(sphere) * 0.70710678;
+            double footprint = halfDiagonal * FootprintMargin;
+
+            // Child of the PQS: SetupMods()/GetChildMods() collect PQSMods from the sphere's children.
+            GameObject go = new GameObject(DecalGoName);
+            go.transform.SetParent(sphere.transform, false);
+
+            // The quad center comes straight from PQ.positionPlanetRelative, in the very frame the decal
+            // compares against — no lat/lon round-trip, which would offset it by the body's rotation.
+            decal = ParallaxInterop.AddDecal(go, quadCenter, footprint, DecalOrder, blocked);
+            decal.sphere = sphere;
+            decal.mask = new ScatterMask(footprint);
+            decal.colorMap = decal.mask.Texture;
+
+            // The PQS runs OnSetup itself at build time, but rot and normalisedPosition are needed NOW to
+            // project the disks into the mask.
+            decal.OnSetup();
+
+            decals[key] = decal;
+            LOGGER.LogInfo($"Decal on {body.name} quad dir={quadCenter} " +
+                           $"footprint={footprint:F0} m blocking {blocked.Count} scatter(s)");
+            return decal;
         }
 
         // DestroyImmediate, not Destroy: the objects must be gone before the next SetupMods() collects.
@@ -97,7 +181,11 @@ namespace com.github.lhervier.ksp.bulldozermod.terrain
 
                 foreach (GameObject go in doomed)
                 {
-                    ParallaxInterop.DestroyMask(go);
+                    BulldozerScatterDecal decal = go.GetComponent<BulldozerScatterDecal>();
+                    if (decal != null && decal.mask != null)
+                    {
+                        decal.mask.Destroy();
+                    }
                     Object.DestroyImmediate(go);
                     touched.Add(body);
                     purged++;
@@ -112,42 +200,6 @@ namespace com.github.lhervier.ksp.bulldozermod.terrain
             {
                 LOGGER.LogInfo($"Purged {purged} decal(s) from {touched.Count} body(ies)");
             }
-        }
-
-        // Returns true when a decal was actually added.
-        private static bool Inject(BulldozerAction action)
-        {
-            CelestialBody body = FlightGlobals.GetBodyByName(action.bodyName);
-            if (body == null || body.pqsController == null)
-            {
-                LOGGER.LogWarning($"Skipping action on unknown/PQS-less body '{action.bodyName}'");
-                return false;
-            }
-
-            List<string> blocked = ParallaxInterop.GetScatterNames(body.name);
-            if (blocked.Count == 0)
-            {
-                LOGGER.LogWarning($"No Parallax scatter to block on '{body.name}' — skipping");
-                return false;
-            }
-
-            PQS sphere = body.pqsController;
-            double footprint = ScatterMask.FootprintRadius(sphere, action.radius);
-            Texture2D mask = ScatterMask.CreateDiskMask(footprint, action.radius);
-
-            // Child of the PQS: SetupMods()/GetChildMods() collect PQSMods from the sphere's children.
-            GameObject go = new GameObject(DecalGoName);
-            go.transform.SetParent(sphere.transform, false);
-
-            // Body-frame direction, matching what the decal compares against (quad.positionPlanetRelative).
-            // GetRelSurfaceNVector, not GetSurfaceNVector: the latter also applies the body's rotation.
-            Vector3d position = body.GetRelSurfaceNVector(action.lat, action.lon);
-
-            ParallaxInterop.AddDecal(go, position, footprint, DecalOrder, mask, blocked).sphere = sphere;
-
-            LOGGER.LogInfo($"Decal on {body.name} lat={action.lat:F5} lon={action.lon:F5} " +
-                           $"clear={action.radius:F0}m footprint={footprint:F0}m blocking {blocked.Count} scatter(s)");
-            return true;
         }
     }
 }

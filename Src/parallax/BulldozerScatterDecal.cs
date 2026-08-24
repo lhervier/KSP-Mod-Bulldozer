@@ -2,38 +2,46 @@ using System;
 using UnityEngine;
 using Parallax.PQS_Mods;
 using com.github.lhervier.ksp.shared;
+using com.github.lhervier.ksp.bulldozermod.terrain;
 
 namespace com.github.lhervier.ksp.bulldozermod.parallax
 {
     /// <summary>
-    /// Parallax's scatter-exclusion decal, with its quad inclusion test made numerically safe.
+    /// Parallax's scatter-exclusion decal, restricted to a SINGLE leaf quad — the one it is centered on.
     ///
-    /// Everything else (the mask, the blocked scatter list, how the scatter system reads them) is inherited
-    /// untouched: Parallax stores decals in maskedScattersPerQuad typed as the base class, so a subclass is
-    /// picked up exactly like the real thing.
+    /// One decal per quad is what makes merging trivial: a quad either has our decal or it does not, so
+    /// cleaning a new area is "complete this quad's mask, or create it". It also removes any chance of two
+    /// of our decals fighting over a quad, since Parallax only accepts one per quad.
     ///
-    /// WHY: the base class decides whether a quad is in range with
-    ///     Math.Acos(Vector3d.Dot(quad.positionPlanetRelative, normalisedPosition)) &lt; inclusionAngle
-    /// but `position` is a Vector3 (float, ~1e-7 relative precision) while positionPlanetRelative is a
-    /// Vector3d. When the quad sits right under the decal the true angle is tiny (8e-5 rad for 16 m on the
-    /// Mun, i.e. a cosine of 1 - 3.2e-9, far below float noise), so the dot product comes out slightly ABOVE
-    /// 1, Acos returns NaN, and `NaN &lt; inclusionAngle` is false in C#. The decal then attaches to every quad
-    /// around it but NOT to the one at its center — measured in game: 4 quads registered at 712-754 m, the
-    /// one 16 m away missed. Parallax never hits this because its own decals (the KSC) are placed at
-    /// arbitrary spots, never centered on a quad.
+    /// Two things make this possible, and both are load-bearing:
+    ///
+    /// 1. Overriding OnQuadPreBuild. Left to the base class, a ~700 m decal would grab every quad within a
+    ///    2.8 km cone (inclusionAngle is 4x the radius) and lock out its neighbours' decals.
+    /// 2. Clamping the dot product before Acos. The decal sits EXACTLY on its quad's center, so the angle is
+    ///    zero and `position` being a Vector3 (float) makes the dot come out just above 1 — Acos would
+    ///    return NaN and the quad would never attach. See the README, "PIEGE 1".
+    ///
+    /// The quad is identified by the position of its center, never by reference: PQ instances are destroyed
+    /// and recreated constantly, only their center persists.
     /// </summary>
     public class BulldozerScatterDecal : PQSMod_MapDecalVertexRemoveScatter
     {
         private static readonly ModLogger LOGGER = new ModLogger("Decal");
 
+        // How close a quad center must be to ours to be "our" quad. Quad centers are hundreds of meters
+        // apart, so anything small works; 5 m absorbs the float rounding of `position` without ambiguity.
+        private const double CenterToleranceMeters = 5.0;
+
         /// <summary>
-        /// Full-precision direction of the decal center, in body frame. Set before the sphere builds; it
-        /// replaces the float-rounded value the base class derives from <c>position</c>.
+        /// Full-precision direction of the quad center this decal owns, in body frame. Set before the sphere
+        /// builds; it replaces the float-rounded value the base class derives from <c>position</c>.
         /// </summary>
         public Vector3d preciseDirection;
 
-        // Same formula as the base class's private inclusionAngle, recomputed here because we cannot read it.
-        private double inclusionAngle;
+        /// <summary>The mask this decal writes into. Owned by us, destroyed with the decal.</summary>
+        public ScatterMask mask;
+
+        private double _centerTolerance;
 
         public override void OnSetup()
         {
@@ -48,50 +56,40 @@ namespace com.github.lhervier.ksp.bulldozermod.parallax
                       * Quaternion.FromToRotation((Vector3)normalisedPosition, Vector3.up);
             }
 
-            inclusionAngle = Math.Atan(radius / sphere.radius) * 4.0;
-            LOGGER.LogInfo($"Setup on {sphere.name}: radius={radius:F0} m, " +
-                           $"inclusion={inclusionAngle * sphere.radius:F0} m, blocked={blockedScatters?.Count}");
+            _centerTolerance = CenterToleranceMeters / sphere.radius;
         }
 
         public override void OnQuadPreBuild(PQ quad)
         {
-            if (AngleTo(quad) >= inclusionAngle)
+            if (quad.subdivision != sphere.maxLevel)
             {
                 return;
             }
-            PQSMod_MapDecalVertexRemoveScatter owner;
-            if (maskedScattersPerQuad.TryGetValue(quad, out owner))
+            if (QuadLocator.AngleBetween(quad.positionPlanetRelative, normalisedPosition) > _centerTolerance)
             {
-                // Parallax allows a single decal per quad, and the loser is simply skipped. Naming the owner
-                // matters: near the KSC it is Parallax's own ParallaxMaskKSC (radius 1400 m, so a 5.6 km
-                // reach), which explains an area that stubbornly refuses to be cleared.
+                return;
+            }
+
+            PQSMod_MapDecalVertexRemoveScatter owner;
+            if (maskedScattersPerQuad.TryGetValue(quad, out owner) && !ReferenceEquals(owner, this))
+            {
+                // Parallax allows a single decal per quad and the loser is skipped silently. Naming the owner
+                // matters: near the KSC it is Parallax's own ParallaxMaskKSC, which explains an area that
+                // stubbornly refuses to be cleared.
                 LOGGER.LogWarning($"Quad already owned by '{owner.gameObject.name}' " +
                                   $"(radius={owner.radius:F0} m) — our decal is ignored on it");
                 return;
             }
-            maskedScattersPerQuad.Add(quad, this);
+            maskedScattersPerQuad[quad] = this;
         }
 
         public override void OnQuadDestroy(PQ quad)
         {
-            // Unconditional: the angle test could reject a quad we did register (and the entry must go
-            // whoever owns it, since the quad itself is gone).
-            maskedScattersPerQuad.Remove(quad);
-        }
-
-        // Clamping before Acos is the whole point: without it a perfectly centered quad yields NaN.
-        private double AngleTo(PQ quad)
-        {
-            double dot = Vector3d.Dot(quad.positionPlanetRelative, normalisedPosition);
-            if (dot > 1.0)
+            PQSMod_MapDecalVertexRemoveScatter owner;
+            if (maskedScattersPerQuad.TryGetValue(quad, out owner) && ReferenceEquals(owner, this))
             {
-                dot = 1.0;
+                maskedScattersPerQuad.Remove(quad);
             }
-            else if (dot < -1.0)
-            {
-                dot = -1.0;
-            }
-            return Math.Acos(dot);
         }
     }
 }
