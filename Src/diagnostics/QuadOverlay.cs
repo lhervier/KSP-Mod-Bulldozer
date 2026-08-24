@@ -19,9 +19,6 @@ namespace com.github.lhervier.ksp.bulldozermod.diagnostics
     [KSPAddon(KSPAddon.Startup.Flight, false)]
     public class QuadOverlay : MonoBehaviour
     {
-        // Same radius the PAW action uses, so the "impacted" count matches what a click would do.
-        private const double ClearRadius = 20.0;
-
         private const float RefreshInterval = 0.25f;
 
         private bool _visible;
@@ -112,15 +109,34 @@ namespace com.github.lhervier.ksp.bulldozermod.diagnostics
 
             double halfDiagonal;
             List<QuadLocator.QuadRef> impacted = QuadLocator.FindImpactedQuads(
-                body, vessel.latitude, vessel.longitude, ClearRadius, out halfDiagonal);
+                body, vessel.latitude, vessel.longitude, BulldozerCleanModule.ClearRadius, out halfDiagonal);
 
-            // The two edges are shown separately on purpose: a quad is not square, and the gap between them
-            // grows towards the edges of a cube face (1.41x at 45 deg).
-            double alongEast, alongNorth;
-            QuadLocator.MeasureQuadEdges(body, ranked[0].Key, out alongEast, out alongNorth);
-            sb.AppendLine($"edges {alongEast:F0} x {alongNorth:F0} m (nominal {QuadLocator.NominalQuadEdge(sphere):F0} m)");
-            sb.AppendLine($"half-diagonal {halfDiagonal:F0} m");
-            sb.AppendLine($"a {ClearRadius:F0} m clean here would touch {impacted.Count} quad(s)");
+            // The two sides are shown separately on purpose: a quad is not square, and the gap between them
+            // grows towards the edges of a cube face (1.41x at 45 deg). The two half-diagonals expose the
+            // skew on top of that: they are equal only where the quad is a true rectangle.
+            QuadLocator.QuadShape shape;
+            if (QuadLocator.TryMeasureShape(body, ranked[0].Key, out shape))
+            {
+                sb.AppendLine($"sides {shape.sideA:F0} x {shape.sideB:F0} m " +
+                              $"(nominal {QuadLocator.NominalQuadEdge(sphere):F0} m)");
+                sb.AppendLine($"half-diag {shape.halfDiagonalMin:F0} .. {shape.halfDiagonalMax:F0} m");
+            }
+            else
+            {
+                sb.AppendLine($"shape not measurable (nominal {QuadLocator.NominalQuadEdge(sphere):F0} m)");
+            }
+
+            sb.AppendLine($"a {BulldozerCleanModule.ClearRadius:F0} m clean here would touch {impacted.Count} quad(s)");
+
+            // What the decals would actually allocate, so a body with tiny or huge quads shows up here
+            // rather than as a memory surprise.
+            if (impacted.Count > 0)
+            {
+                double footprint = halfDiagonal * ScatterCleaner.FootprintMargin;
+                int px = ScatterMask.SizeFor(footprint);
+                sb.AppendLine($"mask {px}px over {2.0 * footprint:F0} m " +
+                              $"({2.0 * footprint / px:F2} m/px, {2L * px * px / 1024L} Ko each)");
+            }
             return sb.ToString();
         }
     }

@@ -7,9 +7,10 @@ namespace com.github.lhervier.ksp.bulldozermod.persistence
     /// One cleaning action, stored per-save (event-sourcing) and replayed at load: a disk to clear, plus the
     /// leaf quads it covers.
     ///
-    /// The quads are captured at click time, in flight, because they cannot be recomputed at load time —
-    /// the terrain is not built yet. They stay valid across loads as long as the terrain detail preset does
-    /// not change, which is why <see cref="maxLevel"/> travels with them.
+    /// The quads are captured at click time, in flight, because Parallax's scatter registry — which alone
+    /// says which quads can carry scatters — only exists once the PQS is built. The geometry itself would be
+    /// recomputable. They stay valid across loads as long as the terrain detail preset does not change,
+    /// which is why <see cref="maxLevel"/> travels with them.
     /// </summary>
     public class BulldozerAction
     {
@@ -24,9 +25,10 @@ namespace com.github.lhervier.ksp.bulldozermod.persistence
         public int maxLevel;
 
         /// <summary>
-        /// Half-diagonal (m) of the impacted leaf quads, measured in flight. Carried here because it cannot
-        /// be recomputed at load time (no quads yet) and cannot be derived from maxLevel either — quads are
-        /// neither square nor uniform across a cube face. See QuadLocator.MeasureQuadEdges.
+        /// Largest half-diagonal (m) among the impacted leaf quads, measured in flight. Carried here
+        /// because there are no quads to measure at load time, and it cannot be derived from maxLevel
+        /// either — quads are neither square nor uniform across a cube face. See QuadLocator.HalfDiagonal.
+        /// Without it an action cannot be replayed: there is no safe formula to fall back on.
         /// </summary>
         public double quadHalfDiagonal;
 

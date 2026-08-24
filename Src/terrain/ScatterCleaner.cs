@@ -36,7 +36,11 @@ namespace com.github.lhervier.ksp.bulldozermod.terrain
 
         // The decal must cover its whole quad, whose furthest point is one half-diagonal away; the margin
         // keeps the quad inside the shader's inscribed disk rather than exactly on its edge.
-        private const double FootprintMargin = 1.1;
+        //
+        // It does NOT try to also contain the disk: on a small body a disk near a quad corner reaches well
+        // past this, and DrawDisk clamps it. That is correct — the clipped part lies outside the quad, and
+        // the neighbouring quad's own mask carries it.
+        public const double FootprintMargin = 1.1;
 
         /// <summary>
         /// Purges our decals from every body, rebuilds one decal per impacted quad, and resets the touched
@@ -127,13 +131,15 @@ namespace com.github.lhervier.ksp.bulldozermod.terrain
                 return null;
             }
 
-            // The half-diagonal comes from the action (measured in flight). The nominal value is only a
-            // fallback for an action saved before that field existed — quads are not square, so a computed
-            // value is never reliable here.
-            double halfDiagonal = quadHalfDiagonal > 0.0
-                ? quadHalfDiagonal
-                : QuadLocator.NominalQuadEdge(sphere) * 0.70710678;
-            double footprint = halfDiagonal * FootprintMargin;
+            // The half-diagonal is measured in flight and travels in the action. There is NO fallback on
+            // purpose: the only formula available at load time under-estimates a quad by up to 27% (a PQS is
+            // a projected cube), so it would build a mask too small for its own quad, silently.
+            if (quadHalfDiagonal <= 0.0)
+            {
+                LOGGER.LogWarning($"Action on '{body.name}' carries no quad half-diagonal — quad skipped");
+                return null;
+            }
+            double footprint = quadHalfDiagonal * FootprintMargin;
 
             // Child of the PQS: SetupMods()/GetChildMods() collect PQSMods from the sphere's children.
             GameObject go = new GameObject(DecalGoName);

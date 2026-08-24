@@ -52,18 +52,22 @@ if (quadAngle < inclusionAngle) { maskedScattersPerQuad.Add(quad, this); }   // 
 
 Donner `radius = 20` m au decal serait donc une erreur : `inclusionAngle` vaudrait ~80 m au sol alors qu'un quad-feuille fait ~900 m d'arête, si bien que le centre du quad qui nous porte serait presque toujours hors de portée. **Aucun quad attaché, aucun effet — et aucune erreur dans le log.** Le symptôme serait identique au mur de l'ancien objectif (« le flatten à 10 m ne fait rien »), pour une cause totalement différente.
 
-D'où le **découplage des deux rayons**, implémenté dans `ScatterMask.FootprintRadius` :
+D'où le **découplage des deux rayons** (`ScatterCleaner.FootprintMargin` pour l'emprise, `BulldozerAction.radius` pour la zone nettoyée) :
 
 | | Rôle | Valeur |
 |---|---|---|
-| `radius` du PQSMod | **emprise** : capture les quads + définit l'espace UV du masque | calculée depuis la taille du quad — **325 m sur Kerbin**, 217 m sur la Mun |
+| `radius` du PQSMod | **emprise** : capture les quads + définit l'espace UV du masque | `quadHalfDiag × FootprintMargin` (1,1) — **~1090 m sur Kerbin**, ~610 m sur la Mun |
 | disque dessiné dans le masque | **la zone réellement nettoyée** | ce que demande le joueur (20 m) |
 
-La résolution du masque se déduit des deux : l'emprise (2×`radius`) étalée sur la texture. Sur Kerbin, 650 m sur 1024 px ≈ **0,63 m/pixel** — assez fin pour que la bordure des 20 m soit franche, ce que le test confirme (§5).
+La résolution du masque se déduit des deux : l'emprise (2×`radius`) étalée sur la texture. Elle n'est **pas** un réglage libre — voir « Taille du masque » ci-dessous.
 
 ### Le repère du masque : placer un point dans la texture
 
-**L'espace couvert est un carré**, par construction : `u` et `v` sont calculés avec le *même* `radius`, donc la texture s'étale sur `2×radius` de côté (650 m chez nous sur Kerbin). Une texture non carrée serait **étirée**, pas rognée — d'où le 1024×1024.
+**L'espace couvert est un carré**, par construction : `u` et `v` sont calculés avec le *même* `radius` et étalés sur le *même* nombre de pixels, donc la texture couvre `2×radius` de côté. Elle doit donc être carrée elle aussi : une texture non carrée serait **étirée**, pas rognée.
+
+⚠️ **La texture n'est PAS plaquée sur la forme du quad**, et un pixel n'est jamais un rectangle. Le masque est un carré du plan tangent, orienté par `rot`, qui **circonscrit** le quad sans s'aligner dessus — c'est précisément pourquoi il est dimensionné sur la **demi-diagonale**. Un pixel vaut donc `2×radius / MaskSize` mètres **dans les deux directions**, quelle que soit la forme du quad. `DrawDisk` le suppose déjà : son `radiusPx` est un scalaire unique, donc le disque y est tracé comme un cercle en espace pixel.
+
+Conséquence à assumer : le quad étant inscrit **en diagonale** dans ce carré, environ **60 % des pixels tombent hors du quad**. Ce gaspillage ne vient pas de l'allongement des quads — un quad parfaitement carré en gaspille déjà 59 %, un quad 313×478 m en gaspille 62 %. Il est incompressible tant que le repère du masque est celui que Parallax impose.
 
 **L'orientation vient du quaternion `rot`**, construit dans `OnSetup` et appliqué au point candidat par le shader :
 
@@ -93,6 +97,59 @@ double w = (v.z * body.Radius / decal.radius + 1.0) * 0.5;
 // -> pixel (u * size, w * size), au flip vertical près selon la convention de SetPixels32 (à vérifier à l'implémentation)
 ```
 
+### Taille du masque : un pixel = 5 m
+
+**Décidé le 2026-08-24.** La texture était figée à 2048×2048 quel que soit le corps. Comme elle couvre l'emprise du quad, et que celle-ci varie d'un facteur ~50 entre Gilly et Eve, **la résolution réelle variait d'autant** — sans que rien ne le signale :
+
+| Corps (`maxLevel` 9) | Arête du quad | m/pixel à 2048 | Disque de rayon 5 m |
+|---|---|---|---|
+| Gilly | 51 m | 0,039 | 258 px de diamètre |
+| Mun | 781 m | 0,59 | 17 px |
+| Kerbin | 1405 m | 1,07 | 9,4 px |
+| Eve | 2734 m | **2,08** | **4,8 px** |
+
+Deux défauts symétriques : Eve rendait le disque minimal sur 5 pixels, pendant que Gilly dépensait 8 Mo pour une précision de 4 cm dont personne ne profite.
+
+**Règle retenue : la texture est dimensionnée pour qu'un pixel vaille toujours un carré de 5 m × 5 m au sol.**
+
+```
+côté couvert = 2 × footprint = 2 × quadHalfDiag × FootprintMargin
+MaskSize     = round(côté couvert / 5)     borné à [32, 2048]
+```
+
+| Corps | Arête du quad | Côté couvert | `MaskSize` | Mémoire |
+|---|---|---|---|---|
+| Gilly (9) | 51 m | 79 m | 32 (plancher) | 2 Ko |
+| Mun à 45° | 313 × 478 m | 629 m | 126 | 32 Ko |
+| Mun (9) | 781 m | 1215 m | 243 | 118 Ko |
+| Kerbin (9) | 1405 m | 2186 m | 437 | 382 Ko |
+| Eve (9) | 2734 m | 4253 m | 851 | 1,45 Mo |
+
+Contre **8 Mo par quad partout** aujourd'hui. Les bornes ne sont que des garde-fous : aucun corps stock n'atteint le plafond (il faudrait une arête de quad > 6,5 km), et le plancher n'existe que pour éviter les textures dégénérées sur les très petits corps.
+
+**Pas d'arrondi à la puissance de deux.** C'est la seule vraie source d'imprécision sur les 5 m : arrondir 851 → 1024 sur Eve donnerait des cases de **4,15 m** (17 % d'écart), différent sur chaque corps. Avec la taille exacte, l'écart tombe sous le millième (le simple arrondi à l'entier), et une `Texture2D` NPOT en bilinéaire + clamp ne pose aucun problème. Si les 5 m deviennent un **contrat de gameplay** (sélection par cases), c'est indispensable.
+
+**La mémoire compte double.** `ScatterMask` retient le `byte[] _pixels` (pour les `DrawDisk` suivants) *et* la `Texture2D`. Les chiffres ci-dessus incluent les deux ; le commentaire du fichier qui annonce « 4 Mo par quad » ne comptait que la texture.
+
+**La taille est dérivée, jamais persistée.** Elle se recalcule au chargement depuis le `quadHalfDiag` de l'action, puisque les masques sont reconstruits en rejouant les disques. La stocker exposerait à un changement de preset de détail (`maxLevel` change → l'arête change → la taille attendue change) — ce que le garde-fou `action.maxLevel` détecte et refuse déjà.
+
+**La grille est propre à chaque quad.** Chaque masque a son origine et son orientation (`rot` dépend du centre du quad), donc les cases de deux quads voisins **ne sont pas alignées** : une zone à cheval peut faire un décrochement d'au plus une case (5 m) à la couture. C'est assumé — chercher à construire une grille globale se heurterait à la torsion mal conditionnée de `FromToRotation` près des pôles du corps, pour un gain nul sur du retrait de cailloux.
+
+**Le rayon minimal suit la taille de case.** L'ancien seuil de 5 m était calibré sur ~0,7 m/pixel ; à 5 m par case il ne ferait plus que 2 cases de diamètre. Il est donc défini comme `3 × ScatterMask.MetersPerPixel`, soit **15 m**, et se recalera de lui-même si la taille de case bouge.
+
+**Si la sélection passe un jour à des cases 5×5 :** stocker **le geste** (rectangle, disque), jamais les cases. Les cases sont la granularité de rasterisation dans le masque, pas une unité de persistance — une zone de 100×100 m fait déjà 400 cases, et c'est le même raisonnement qui avait fait rejeter le stockage des hauteurs par sommet. Bénéfice au passage : des gestes alignés sur la grille rendent le rejeu **bit à bit identique** et le recouvrement de deux zones exact.
+
+### Ce que la multiplicité des masques ne coûte PAS
+
+Un disque posé près d'un coin de quad doit être dessiné dans **4 masques** distincts. Deux craintes légitimes, toutes deux infondées — notées ici pour ne pas les ré-instruire :
+
+- **Les 4 masques sont d'accord au demi-millimètre.** Chaque decal projette orthographiquement sur *son* plan tangent ; pour un point à distance angulaire `θ` du centre du decal, l'erreur vaut `R·θ³/6`, soit **0,45 mm** au coin d'un quad de Kerbin. Aucun décrochement visible ne viendra des repères — seulement, au pire, de la quantification en pixels (une case), aux 2 points où le bord du cercle croise une frontière de quad.
+- **Le bord n'est pas un escalier.** `FilterMode.Bilinear` + seuil `< 0.5` dans le shader reconstruisent la frontière à la **demi-résolution du pixel** : un disque de 8 cases rend un octogone arrondi, pas un crénelage.
+
+Et surtout : **le masque ne s'affiche jamais**. Il décide, rocher par rocher, lequel disparaît. Le bord perçu est celui des scatters survivants — déjà irrégulier à l'échelle de leur espacement. Une quantification à 5 m par-dessus une distribution pseudo-aléatoire à 2-3 m se lit comme une clairière aux bords naturels, ce qui est le rendu recherché.
+
+**Troncature sur les petits corps (sans conséquence).** Sur Gilly, `FootprintMargin = 1.1` ne laisse que ~3,6 m de marge autour d'un quad de 51 m : un disque de 20 m posé près d'un coin **sort du masque**, et `DrawDisk` le clampe. C'est inoffensif — la partie tronquée est hors du quad, donc hors de la zone que ce decal contrôle, et le masque du quad voisin l'a dessinée en entier de son côté. La marge de 1,1 ne sert qu'à garantir que le carré contient le quad malgré la rotation, et pour ça elle suffit toujours.
+
 ### Architecture : un decal par quad
 
 **Décidée le 2026-08-24, en remplacement du « un decal par zone ».** Le decal n'est plus posé sur le vaisseau mais **au centre du quad-feuille**, et il ne s'attache **qu'à ce quad-là**. La zone à nettoyer, elle, est dessinée dans son masque à la position réelle du vaisseau.
@@ -115,15 +172,30 @@ Deux conséquences à ne pas perdre de vue :
 - le decal étant **exactement** au centre de son quad, l'angle vaut zéro : le clamp avant `Acos` (§5, PIÈGE 1) n'est plus un correctif de confort, c'est **la condition de fonctionnement** ;
 - on ne peut pas retenir la référence `PQ` (les quads sont détruits et recréés sans cesse) : un decal identifie son quad par la **position de son centre**, à quelques mètres près.
 
-**Le test « ce quad est-il touché ? » est exact**, sans marge : le centre du disque est projeté dans le repère tangent local (axes est/nord pris sur les voisins du quad), ce qui ramène le problème à une distance point-rectangle classique. La courbure introduit une erreur millimétrique sur ~740 m — négligeable. Repli conservateur (demi-diagonale + rayon) uniquement quand le quad n'a aucun voisin exploitable, au bord d'une face de cube.
+**Le test « ce quad est-il touché ? » est exact**, et sans repli.
 
-*Une version antérieure utilisait ce repli partout : elle sélectionnait un quad voisin dès que son centre était à moins de 543 m, alors qu'un disque de 20 m ne franchit la frontière que si celle-ci est à moins de 20 m. Un nettoyage à 317 m du centre de son quad créait ainsi 2 decals au lieu d'un — un masque de 4 Mo pour rien.*
+Une arête droite sur la face du cube se projette en **arc de grand cercle** : les directions qui traversent un segment droit engendrent un plan, et ce plan passe par le centre du corps. Un quad projeté est donc exactement l'**intersection de quatre demi-espaces**. Les quatre coins se lisent sur `PQ.quadMatrix` (la matrice qui envoie le patch de référence sur la cellule de la face, coins en `(±0,5, 0, ±0,5)`), chaque arête donne une normale `n_k = C_k × C_k+1`, et le disque devient une calotte de rayon angulaire `α = rayon / R` :
 
-**Les quads impactés sont calculés au clic, pas au chargement.** Au moment de l'injection (`OnLoad`), les quads n'existent pas encore et leur géométrie n'est pas reconstructible sans réimplémenter la projection cube→sphère du PQS. On profite donc du clic, où le vaisseau est en vol et les quads bien présents, pour relever le **centre (lat/lon) de chaque quad touché** et le stocker dans l'action. C'est stable d'un chargement à l'autre tant que le preset de détail ne change pas (`maxLevel` est donc stocké avec).
+```
+le disque rate le quad  ⟺  ∃k : dot(centre, n_k) < −sin(α)
+```
+
+Quatre produits scalaires. **Aucune hypothèse de rectangle, aucun voisin requis**, valable quel que soit le biais du quad et jusqu'au bord de la zone subdivisée. Le test est **conservateur aux coins** — une calotte passée en diagonale au-delà d'un coin peut franchir les quatre plans sans toucher le quad : c'est le sens d'erreur inoffensif (un decal inutile), jamais l'inverse (un caillou oublié).
+
+`TryGetEdgePlanes` vérifie au passage que les coins sont pris **dans l'ordre du tour**. Si une diagonale s'y glissait, les plans couperaient le quad au lieu de le borner ; les quatre normales seraient alors incohérentes (ni toutes rentrantes, ni toutes sortantes), et le quad est refusé avec une erreur plutôt que testé contre du n'importe quoi.
+
+*Deux versions antérieures ont échoué ici, et les deux méritent d'être retenues.* La première prenait un rayon de recherche **calculé** (`NominalQuadEdge`) : elle ne trouvait **aucun** quad alors que le vaisseau était au coin de quatre. La seconde mesurait un repère tangent sur les voisins et testait une distance point-rectangle — juste au centre d'une face, mais elle cessait d'être conservative vers les coins du cube (un quad est un **parallélogramme**, pas un rectangle), et son repli « demi-diagonale + rayon », annoncé comme conservateur, reposait justement sur la formule qui **sous-estime de 27 %**. Il pouvait donc rater un quad : le bug d'origine, réintroduit dans le chemin censé s'en prémunir.
+
+**Deux limites connues**, toutes deux hors géométrie :
+
+- **Ce que Parallax n'a pas enregistré est invisible.** La recherche parcourt `ScatterComponent.scatterQuadData`, filtré à `subdivision == maxLevel` ; un quad de `maxLevel-1` portant des scatters serait écarté silencieusement. Sans effet tant que le rayon reste petit — le disque ne quitte pas le cœur de la zone de détail max, sous le vaisseau — mais à surveiller le jour où le rayon devient paramétrable.
+- **« Au pire 4 quads » suppose un disque petit devant un quad.** Sur un petit corps les quads le sont aussi (`2R / 2^maxLevel` : 51 m sur Gilly à `maxLevel` 9, 25 m à 10), et un disque de 20 m peut en toucher davantage. Le code n'en dépend pas (la recherche renvoie une liste) — ne pas figer ce 4 ailleurs.
+
+**Les quads impactés sont calculés au clic, pas au chargement.** Non pas parce que leur géométrie serait irrécupérable — elle se recalcule très bien depuis `quadMatrix` — mais parce que **le registre de Parallax n'existe qu'en vol** : lui seul dit quels quads peuvent porter des scatters, et il se peuple à la construction du PQS. On profite donc du clic pour relever le **centre de chaque quad touché** (la direction brute, jamais lat/lon) et la plus grande demi-diagonale, puis les stocker dans l'action. C'est stable d'un chargement à l'autre tant que le preset de détail ne change pas (`maxLevel` est donc stocké avec).
 
 ### PIÈGE — un quad n'a ni la taille qu'on croit, ni la forme qu'on croit
 
-Deux erreurs successives, toutes deux mesurées en jeu sur la Mun (`maxLevel = 9`, formule : 614 m) :
+Trois niveaux de piège, les deux premiers déjà payés en jeu (Mun, `maxLevel = 9`, formule : 614 m) :
 
 | Position | Arêtes réelles | Rapport à la formule |
 |---|---|---|
@@ -133,17 +205,43 @@ Deux erreurs successives, toutes deux mesurées en jeu sur la Mun (`maxLevel = 9
 
 1. **La taille ne se calcule pas.** `(π/2 × R) / 2^maxLevel` suppose des quads uniformes **en angle** ; le PQS est un cube projeté, ils sont uniformes sur le **plan de la face**. *Conséquence vécue : la recherche de quads, calibrée sur la formule, n'en trouvait **aucun** alors que le vaisseau était au coin de quatre d'entre eux.*
 2. **Un quad n'est pas carré.** Au bord d'une face, l'échelle vaut `1/(1+t²)` radialement mais `1/√(1+t²)` transversalement — un rapport de **1,41 à 45°**. Moyenner les deux axes ferait tester un carré que le quad n'a pas, avec le risque de **manquer** un quad réellement touché.
+3. **Un quad n'est même pas un rectangle.** Les deux axes de la grille, perpendiculaires sur la face plate, ne le restent pas après projection : l'angle entre eux vaut 90° sur les médianes d'une face, ~101° à mi-face, et **120° à un coin du cube**. Un quad est un **parallélogramme**. Un test point-rectangle, même avec les deux côtés correctement mesurés, y cesse d'être conservatif.
 
-D'où `QuadLocator.MeasureQuadEdges`, qui mesure **les deux axes séparément** sur les voisins (`PQ.east/west` et `north/south`). La demi-diagonale qui en découle **voyage dans l'action** (`quadHalfDiag`) : au chargement il n'y a aucun quad à mesurer, et c'est elle qui dimensionne l'emprise du decal.
+**Où tester :** les 8 coins du cube sont à **lat ±35,26°** (soit `arctan(1/√2)`), **lon 45 / 135 / 225 / 315°**. C'est là que le maillage est le plus déformé — et non aux pôles, qui tombent au centre des faces `Yp`/`Yn` et sont au contraire l'endroit le **plus régulier** (tangent à la sphère, échelle 1, isotrope).
+
+D'où le test exact décrit plus haut : les quatre coins viennent de `PQ.quadMatrix`, sans rien mesurer ni supposer de la forme. `QuadLocator.TryMeasureShape` mesure en plus les deux côtés **séparément**, et les deux demi-diagonales extrêmes (elles ne sont égales que sur un vrai rectangle : leur écart affiche le biais) — pour le diagnostic uniquement. La plus grande demi-diagonale **voyage dans l'action** (`quadHalfDiag`) : au chargement il n'y a aucun quad à mesurer, et c'est elle qui dimensionne l'emprise du decal. Sans elle l'action est **ignorée avec un avertissement** — il n'existe aucune formule de repli sûre, `NominalQuadEdge` étant précisément le piège n°1.
+
+### PIÈGE — les gros scatters sont des GRAPPES, pas des rochers
+
+**Constaté en jeu sur la Mune (2026-08-25), après une enquête qui a d'abord accusé le mod à tort.**
+
+Symptôme : un nettoyage à 20 m fait disparaître le gravier mais laisse des **blocs à 5 m du rover**. Recliquer n'y change rien. Tout le reste est pourtant parfait — 2 quads sélectionnés, masques posés, `readBlockMap=True` sur les 7 familles, aucune erreur.
+
+**Cause : la granularité n'est pas le rocher, c'est la grappe.** Les familles `LargeRocks` / `HugeRocks*` de la Mune utilisent des modèles `clusterhuge` : **une instance = un groupe de blocs étalé sur des dizaines de mètres**. Or le block map supprime l'instance dont **l'ancrage** tombe dans le disque. Une grappe ancrée juste au-delà du rayon continue donc de projeter ses blocs vers l'intérieur.
+
+> **zone réellement propre ≈ rayon demandé − étendue des grappes**
+
+Mesuré sur la Mune : à 20 m un bloc survivait à 5 m ; à 40 m et à 60 m c'était propre. L'étendue est donc de l'ordre de **15 à 25 m**, et `ClearRadius = 40` laisse les ~20 m de propreté visée.
+
+Ce que la lecture de la source Parallax a permis d'**écarter** au passage (à ne pas ré-instruire) :
+
+- **le niveau de subdivision** — `ScatterEligible` rend un scatter *toujours* éligible sur un quad `maxLevel` ; les 7 familles sont bien sur le quad sous le rover ;
+- **le kernel** — `GetDistributeKernel()` choisit le 3 pour `readBlockMap + simplexPerlin`, et les 7 familles de la Mune sont toutes en `simplexPerlin` : même kernel pour toutes ;
+- **les colliders** — `OnColliderReadbackComplete` relit `outputScatterDataBuffer`, **le même buffer**, après filtrage : pas de chemin parallèle qui échapperait au masque ;
+- **la granularité du test** — dans `TerrainScatters.compute` le block map est échantillonné **par instance** (`localCenterDir`, à l'intérieur de la boucle `_PopulationMultiplier`), pas par triangle.
+
+**Et la contrainte structurelle qui interdit le contournement évident :** on ne peut PAS donner un rayon plus grand aux seules grosses familles. Le masque, son rayon, sa rotation et son centre viennent tous de `parent.blockMapPQSMod` — et Parallax n'accepte **qu'un decal par quad**. Donc **un masque, un rayon, pour les 7 familles**. `blockedScatters` choisit *quelles* familles sont bloquées, jamais *à quelle distance*.
+
+**Décision : on documente, on n'impose rien.** Un rayon inférieur à l'étendue des grappes nettoie correctement les petits scatters et laisse les gros — c'est un arbitrage lisible pour le joueur, pas une erreur à refuser. `MinimumRadius` reste donc calé sur la seule résolution du masque. À garder en tête : ce chiffre est **calibré Mune**, et les autres corps embarquent des modèles de tailles très différentes (arbres sur Kerbin, végétation sur Laythe).
 
 ### Règles de refus
 
-- **Rayon < 5 m** : refusé. À ~0,7 m/pixel, un disque plus petit ne serait plus qu'une poignée de pixels.
+- **Rayon < 15 m** : refusé. Le seuil vaut `3 × ScatterMask.MetersPerPixel` — trois cases de masque, le point où le bilinéaire et le seuil 0,5 du shader reconstruisent encore un disque plutôt qu'une tache. Défini à partir de la taille de case, il se recale tout seul si elle change. **Volontairement pas relevé à l'étendue des grappes** : un petit rayon nettoie correctement les petits scatters, il laisse juste les gros debout.
 - **Quad déjà possédé par un autre mod** : refusé, en nommant la zone. Vérifié **au clic** — `maskedScattersPerQuad` est déjà peuplé en vol — donc sans rechargement inutile. En pratique un seul cas existe dans tout `GameData` : **`ParallaxMaskKSC`** (Kerbin, rayon 1400 m, portée 5,6 km). Ni les autres sites de lancement, ni le mémorial Armstrong (qui a bien ses rochers) n'ont de decal d'exclusion.
 
 ### Contraintes
 
-- **Zone circulaire**, rayon **20 m** (en dur pour l'instant, cf. « Ce qui reste à faire »), centrée sur le vaisseau.
+- **Zone circulaire**, rayon **40 m** (en dur pour l'instant, cf. « Ce qui reste à faire »), centrée sur le vaisseau. Le 40 vient des grappes de scatters, pas d'un choix esthétique — voir le PIÈGE ci-dessus.
 - **Aucune modification du relief.** Choix structurant, pas une simplification : ne pas toucher à la hauteur supprime **par construction** toute la famille de problèmes qui a tué l'objectif précédent (§3) — pas de mesh de quad reconstruit différemment de ses voisins, donc ni trou ni fissure de LOD ; pas de sol qui monte ou descend sous un vaisseau posé, donc ni encastrement, ni explosion au rechargement, ni re-seating à gérer.
 - **Persistant** : la zone nettoyée doit le rester après sauvegarde, rechargement, et redémarrage de KSP.
 - **Application par sauvegarde + rechargement**, sur une **save dédiée** (`"BulldozerReload"`, jamais `"persistent"` : le rechargement est une manœuvre du mod, pas une sauvegarde voulue par le joueur, et un autosave de sortie de scène pourrait l'écraser). Le nettoyage n'a pas besoin d'être immédiat, et le rechargement garantit une injection **à froid**, avant que KSP ne bâtisse le PQS, vaisseau *packed*.
@@ -268,5 +366,8 @@ Le nom déclaré est **`Parallax`** — celui du `[KSPAssembly]` de Parallax, pa
 **Le rayon du decal n'est pas le rayon nettoyé** (voir §2) : l'emprise doit rester calibrée sur la taille des quads.
 
 ### Restant ouvert
-- **Les scatters stock** (`removeScatter` → `vbData.allowScatter`) ne sont pas traités. Parallax respecte ce flag, donc un `PQSMod_MapDecal` stock serait une voie complémentaire — sans objet tant que Parallax est installé.
+- **Trois familles d'objets au sol, une seule traitée.** Constaté en jeu :
+  1. **scatters Parallax** — ceux qu'on nettoie ;
+  2. **scatters stock** (`PQSLandControl`, exclus par `removeScatter` → `vbData.allowScatter`) — non traités. Parallax respectant ce flag, un `PQSMod_MapDecal` stock serait la voie complémentaire, sans objet tant que Parallax est installé ;
+  3. **surface features de Breaking Ground** — ni des scatters ni du décor : des objets de gameplay persistants, scannables au bras robotique. Vu en plein milieu d'une zone nettoyée, à 7 m du rover. **À ne probablement PAS supprimer** (c'est de la science), même si elles portent un collider et peuvent gêner une grue. À rouvrir seulement si ça devient un problème concret.
 - **Effets de bord visuels** : le decal déclare `MeshColorChannel`, d'où la question d'un impact éventuel sur la couleur du terrain et sur les biomes. Rien de visible aux essais.

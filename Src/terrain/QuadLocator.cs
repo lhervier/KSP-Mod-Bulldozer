@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using UnityEngine;
 using Parallax;
 using Parallax.PQS_Mods;
+using com.github.lhervier.ksp.shared;
 
 namespace com.github.lhervier.ksp.bulldozermod.terrain
 {
@@ -10,12 +11,15 @@ namespace com.github.lhervier.ksp.bulldozermod.terrain
     /// Locates the leaf quads a cleaning disk covers, and describes them by position rather than by
     /// reference — PQ instances are destroyed and rebuilt constantly, their center is what persists.
     ///
-    /// Only usable in flight, when quads exist. At load time the quads are not built yet and their geometry
-    /// cannot be recomputed without reimplementing the PQS cube projection, which is why the impacted quads
-    /// are captured at click time and stored in the action.
+    /// Only usable in flight, and the reason is Parallax, not geometry: the quads come from its own scatter
+    /// registry, which exists only once the PQS is built. A quad's shape IS recomputable from the PQS cube
+    /// projection (see <see cref="TryGetCorners"/>) — its Parallax registration is not. That is why the
+    /// impacted quads are captured at click time and stored in the action.
     /// </summary>
     public static class QuadLocator
     {
+        private static readonly ModLogger LOGGER = new ModLogger("QuadLocator");
+
         /// <summary>A leaf quad, identified by the direction of its center in BODY FRAME.</summary>
         public struct QuadRef
         {
@@ -33,56 +37,43 @@ namespace com.github.lhervier.ksp.bulldozermod.terrain
             public PQSMod_MapDecalVertexRemoveScatter owner;
         }
 
-        /// <summary>
-        /// Measures a leaf quad's two edge lengths (m) along its own axes. Returns false when it has no
-        /// usable neighbour (a cube face border).
-        ///
-        /// The two axes must be measured SEPARATELY: a quad is not square. On a projected cube the angular
-        /// scale is 1/(1+t^2) radially but 1/sqrt(1+t^2) across, so at 45 deg (t=1) one side is 1.41x the
-        /// other — measured on the Mun: neighbours at 313 m on one axis, 478 m on the other. Averaging them
-        /// would test a square the quad does not have, and could miss a quad the disk really touches.
-        ///
-        /// Neither can they be computed: the obvious formula (pi/2 * R / 2^maxLevel) assumes quads are spread
-        /// evenly in ANGLE, when they are even on the FACE PLANE. Measured on the Mun (maxLevel 9): 781 m at
-        /// the pole (center of a face, the 4/pi maximum), 741 m near the equator, 472 m at 45 deg — against a
-        /// formula that says 614 m everywhere.
-        /// </summary>
-        public static bool MeasureQuadEdges(CelestialBody body, PQ quad, out double alongEast, out double alongNorth)
+        /// <summary>Measured shape of one quad, for diagnostics only. Lengths in meters.</summary>
+        public struct QuadShape
         {
-            alongEast = Distance(body, quad, quad.east, quad.west);
-            alongNorth = Distance(body, quad, quad.north, quad.south);
+            /// <summary>Side length along each grid axis, averaged over its opposite pair.</summary>
+            public double sideA;
+            public double sideB;
 
-            // A single axis is enough to stay honest: fall back to the other one rather than to an average.
-            if (alongEast <= 0.0)
-            {
-                alongEast = alongNorth;
-            }
-            if (alongNorth <= 0.0)
-            {
-                alongNorth = alongEast;
-            }
-            return alongEast > 0.0 && alongNorth > 0.0;
+            /// <summary>
+            /// Closest and furthest corner from the quad center. They differ as soon as the quad is a
+            /// parallelogram rather than a rectangle, which is the rule away from a face's median lines.
+            /// </summary>
+            public double halfDiagonalMin;
+            public double halfDiagonalMax;
         }
 
-        // Distance to whichever of the two opposite neighbours is usable.
-        private static double Distance(CelestialBody body, PQ quad, PQ first, PQ second)
+        // The reference patch every quad is built from spans [-0.5, +0.5] on X and Z (PQS.CreateCache, with
+        // cacheMeshSize = 1); quadMatrix maps it onto the quad's cell of its cube face.
+        //
+        // Consecutive entries MUST share an edge. Slipping a diagonal in here would build planes that slice
+        // across the quad instead of bounding it — TryGetEdgePlanes refuses that case rather than trust it.
+        private static readonly Vector3[] CornerLocal =
         {
-            PQ neighbour = Usable(quad, first) ?? Usable(quad, second);
-            if (neighbour == null)
-            {
-                return 0.0;
-            }
-            return AngleBetween(quad.positionPlanetRelative, neighbour.positionPlanetRelative) * body.Radius;
-        }
-
-        private static PQ Usable(PQ quad, PQ neighbour)
-        {
-            return neighbour != null && neighbour.subdivision == quad.subdivision ? neighbour : null;
-        }
+            new Vector3(-0.5f, 0f, -0.5f),
+            new Vector3( 0.5f, 0f, -0.5f),
+            new Vector3( 0.5f, 0f,  0.5f),
+            new Vector3(-0.5f, 0f,  0.5f)
+        };
 
         /// <summary>
-        /// Rough edge length (m) of a leaf quad, from the sphere alone. Only for display or as a fallback:
-        /// prefer <see cref="MeasureQuadEdge"/>, which is exact — see its remarks.
+        /// Rough edge length (m) of a leaf quad, from the sphere alone. DIAGNOSTICS ONLY — never size
+        /// anything with it, and never use it as a search radius.
+        ///
+        /// It assumes quads are spread evenly in ANGLE, but a PQS is a projected cube: they are even on the
+        /// FACE PLANE. It therefore UNDER-estimates, by up to 4/pi (27%). Measured on the Mun (maxLevel 9,
+        /// formula = 614 m): 781 m at the pole (center of a face, the 4/pi maximum), 741 m near the equator,
+        /// 313 x 478 m at 45 deg (face border) — where the quad is not even square. An earlier version sized
+        /// a search radius with it and found NO quad at all while the vessel sat on the corner of four.
         /// </summary>
         public static double NominalQuadEdge(PQS sphere)
         {
@@ -91,8 +82,9 @@ namespace com.github.lhervier.ksp.bulldozermod.terrain
 
         /// <summary>
         /// Returns the leaf quads a disk of <paramref name="radius"/> meters centered on
-        /// <paramref name="lat"/>/<paramref name="lon"/> can touch, with their current owner when they
-        /// already carry an exclusion decal.
+        /// <paramref name="lat"/>/<paramref name="lon"/> touches, with their current owner when they already
+        /// carry an exclusion decal. <paramref name="halfDiagonal"/> reports the largest half-diagonal among
+        /// them, which is what sizes the decals at injection time.
         ///
         /// Quads come from Parallax's own registry: only quads it tracks can carry scatters, so any other
         /// quad is irrelevant to us.
@@ -111,10 +103,14 @@ namespace com.github.lhervier.ksp.bulldozermod.terrain
 
             Vector3d center = body.GetRelSurfaceNVector(lat, lon);
 
-            // Collect the leaf quads once, and find the one we stand on: the closest center.
-            List<PQ> leaves = new List<PQ>();
-            PQ host = null;
-            double hostAngle = double.MaxValue;
+            // The disk becomes a spherical cap of angular radius radius/R. body.Radius rather than the local
+            // terrain radius: it over-estimates the angle a little, which errs towards one quad too many.
+            double sinAlpha = Math.Sin(radius / body.Radius);
+
+            Vector3d[] corners = new Vector3d[4];
+            Vector3d[] planes = new Vector3d[4];
+            int skipped = 0;
+
             foreach (KeyValuePair<PQ, ScatterSystemQuadData> entry in ScatterComponent.scatterQuadData)
             {
                 PQ quad = entry.Key;
@@ -122,69 +118,22 @@ namespace com.github.lhervier.ksp.bulldozermod.terrain
                 {
                     continue;
                 }
-                leaves.Add(quad);
 
-                double angle = AngleBetween(quad.positionPlanetRelative, center);
-                if (angle < hostAngle)
+                Vector3d quadCenter = quad.positionPlanetRelative;
+                if (!TryGetCorners(quad, corners) || !TryGetEdgePlanes(corners, quadCenter, planes))
                 {
-                    hostAngle = angle;
-                    host = quad;
+                    skipped++;
+                    continue;
                 }
-            }
-            if (host == null)
-            {
-                return found;
-            }
-
-            // Both edges are measured on the host quad: they differ, and they vary across a cube face.
-            double alongEast, alongNorth;
-            bool measured = MeasureQuadEdges(body, host, out alongEast, out alongNorth);
-            if (!measured)
-            {
-                alongEast = alongNorth = NominalQuadEdge(sphere);
-            }
-
-            // Local tangent frame of the terrain, taken from the host's neighbours. Quads of a same face
-            // share it closely enough over the ~1 km we look at.
-            // Assigned unconditionally: the short-circuit below would otherwise leave them unset.
-            Vector3d east = Vector3d.zero;
-            Vector3d north = Vector3d.zero;
-            bool exact = measured && BuildTangentFrame(host, out east, out north);
-
-            double halfEast = alongEast * 0.5;
-            double halfNorth = alongNorth * 0.5;
-            halfDiagonal = Math.Sqrt(halfEast * halfEast + halfNorth * halfNorth);
-
-            // Fallback when the frame could not be built (a cube face border): a conservative test, which may
-            // select a quad the disk misses but never misses one it touches.
-            double reach = halfDiagonal + radius;
-
-            foreach (PQ quad in leaves)
-            {
-                bool touched;
-                if (exact)
-                {
-                    // Point-to-square distance in the quad's own frame: the exact test, no margin needed.
-                    Vector3d offset = center - quad.positionPlanetRelative;
-                    double dx = Math.Abs(Vector3d.Dot(offset, east)) * body.Radius - halfEast;
-                    double dy = Math.Abs(Vector3d.Dot(offset, north)) * body.Radius - halfNorth;
-                    if (dx < 0.0)
-                    {
-                        dx = 0.0;
-                    }
-                    if (dy < 0.0)
-                    {
-                        dy = 0.0;
-                    }
-                    touched = dx * dx + dy * dy < radius * radius;
-                }
-                else
-                {
-                    touched = AngleBetween(quad.positionPlanetRelative, center) * body.Radius <= reach;
-                }
-                if (!touched)
+                if (!Touches(planes, center, sinAlpha))
                 {
                     continue;
+                }
+
+                double half = HalfDiagonal(body, corners, quadCenter);
+                if (half > halfDiagonal)
+                {
+                    halfDiagonal = half;
                 }
 
                 PQSMod_MapDecalVertexRemoveScatter owner;
@@ -192,54 +141,161 @@ namespace com.github.lhervier.ksp.bulldozermod.terrain
 
                 found.Add(new QuadRef
                 {
-                    direction = quad.positionPlanetRelative,
+                    direction = quadCenter,
                     owner = owner
                 });
+            }
+
+            if (skipped > 0)
+            {
+                LOGGER.LogWarning($"{skipped} quad(s) ignored: unusable geometry (quadMatrix not set up?)");
             }
             return found;
         }
 
         /// <summary>
-        /// Builds the terrain's local east/north axes at a quad, from one of its neighbours. Returns false
-        /// when no neighbour of the same subdivision is available (a cube face border).
+        /// Unit directions of a quad's four corners, in the frame of PQ.positionPlanetRelative. Returns
+        /// false when the quad has no usable matrix yet.
         /// </summary>
-        private static bool BuildTangentFrame(PQ quad, out Vector3d east, out Vector3d north)
+        public static bool TryGetCorners(PQ quad, Vector3d[] corners)
         {
-            east = Vector3d.zero;
-            north = Vector3d.zero;
-
-            PQ reference = PickNeighbour(quad);
-            if (reference == null)
+            if (quad == null || corners == null || corners.Length < 4)
             {
                 return false;
             }
 
-            Vector3d up = quad.positionPlanetRelative;
-            Vector3d towards = reference.positionPlanetRelative - up;
-
-            // Remove the radial part so the axis is truly tangent, then complete the frame with a cross
-            // product — which makes the two axes orthogonal by construction.
-            towards -= up * Vector3d.Dot(towards, up);
-            if (towards.sqrMagnitude <= 0.0)
+            for (int i = 0; i < 4; i++)
             {
-                return false;
+                // quadMatrix already carries the face rotation, the cell offset and the subdivision scale,
+                // so this lands straight on the cube face; normalising is the PQS's own projection.
+                //
+                // It cannot be stale on the quads we query: PQS.BuildQuad places a quad's 225 vertices with
+                // this very matrix, and we only ever look at quads Parallax registered, which it does at
+                // build time. A stale matrix would put a whole tile elsewhere on the planet.
+                Vector3 onCube = quad.quadMatrix.MultiplyPoint3x4(CornerLocal[i]);
+                Vector3d dir = new Vector3d(onCube.x, onCube.y, onCube.z);
+                double len = dir.magnitude;
+                if (len <= 0.0)
+                {
+                    return false;
+                }
+                corners[i] = dir / len;
             }
-            east = towards.normalized;
-            north = Vector3d.Cross(up, east).normalized;
             return true;
         }
 
-        private static PQ PickNeighbour(PQ quad)
+        /// <summary>
+        /// Inward normals of the four great-circle planes that bound a quad.
+        ///
+        /// A straight edge on the cube face projects to an arc of a GREAT CIRCLE, because the directions
+        /// through a straight segment span a plane containing the body center. So the projected quad is
+        /// exactly the intersection of four half-spaces — no rectangle assumption, valid however skewed the
+        /// quad is (the two grid axes are 90 deg apart only on a face's median lines, and 120 deg apart at a
+        /// cube corner).
+        ///
+        /// Returns false when the corners are not in cycle order, which would produce meaningless planes.
+        /// </summary>
+        public static bool TryGetEdgePlanes(Vector3d[] corners, Vector3d quadCenter, Vector3d[] planes)
         {
-            PQ[] neighbours = { quad.east, quad.west, quad.north, quad.south };
-            foreach (PQ neighbour in neighbours)
+            if (corners == null || planes == null || corners.Length < 4 || planes.Length < 4)
             {
-                if (neighbour != null && neighbour.subdivision == quad.subdivision)
+                return false;
+            }
+
+            int inward = 0;
+            for (int i = 0; i < 4; i++)
+            {
+                Vector3d n = Vector3d.Cross(corners[i], corners[(i + 1) & 3]);
+                double len = n.magnitude;
+                if (len <= 0.0)
                 {
-                    return neighbour;
+                    return false;
+                }
+                n = n / len;
+                if (Vector3d.Dot(n, quadCenter) > 0.0)
+                {
+                    inward++;
+                }
+                planes[i] = n;
+            }
+
+            if (inward == 4)
+            {
+                return true;
+            }
+
+            // All four pointing outwards just means the corners cycle the other way round: flip them.
+            if (inward == 0)
+            {
+                for (int i = 0; i < 4; i++)
+                {
+                    planes[i] = -planes[i];
+                }
+                return true;
+            }
+
+            // A MIX is the real error: two of the corners are diagonal neighbours, so at least one plane cuts
+            // through the quad. Refuse rather than test against nonsense — this cannot happen with
+            // CornerLocal as written, and exists to catch anyone reordering it.
+            LOGGER.LogError($"Quad corners are not in cycle order ({inward}/4 planes inward) — quad ignored");
+            return false;
+        }
+
+        /// <summary>
+        /// Furthest a corner sits from the quad center, in meters. Exact, and needs no neighbour — unlike a
+        /// measurement taken on PQ.north/east, it still works at the rim of the subdivided area.
+        /// </summary>
+        public static double HalfDiagonal(CelestialBody body, Vector3d[] corners, Vector3d quadCenter)
+        {
+            double max = 0.0;
+            for (int i = 0; i < 4; i++)
+            {
+                double d = AngleBetween(quadCenter, corners[i]) * body.Radius;
+                if (d > max)
+                {
+                    max = d;
                 }
             }
-            return null;
+            return max;
+        }
+
+        /// <summary>
+        /// Measures one quad's shape. Diagnostics: a quad is neither square nor uniform across a cube face,
+        /// so its size is always measured, never computed.
+        /// </summary>
+        public static bool TryMeasureShape(CelestialBody body, PQ quad, out QuadShape shape)
+        {
+            shape = new QuadShape();
+
+            Vector3d[] corners = new Vector3d[4];
+            if (!TryGetCorners(quad, corners))
+            {
+                return false;
+            }
+
+            // Each side is averaged over its opposite pair: on a parallelogram the two differ slightly, and
+            // neither one alone describes the quad.
+            shape.sideA = (AngleBetween(corners[0], corners[1]) + AngleBetween(corners[3], corners[2]))
+                          * 0.5 * body.Radius;
+            shape.sideB = (AngleBetween(corners[1], corners[2]) + AngleBetween(corners[0], corners[3]))
+                          * 0.5 * body.Radius;
+
+            Vector3d quadCenter = quad.positionPlanetRelative;
+            shape.halfDiagonalMin = double.MaxValue;
+            shape.halfDiagonalMax = 0.0;
+            for (int i = 0; i < 4; i++)
+            {
+                double d = AngleBetween(quadCenter, corners[i]) * body.Radius;
+                if (d < shape.halfDiagonalMin)
+                {
+                    shape.halfDiagonalMin = d;
+                }
+                if (d > shape.halfDiagonalMax)
+                {
+                    shape.halfDiagonalMax = d;
+                }
+            }
+            return true;
         }
 
         /// <summary>Angle (rad) between two unit directions, safe against rounding past 1.</summary>
@@ -257,5 +313,20 @@ namespace com.github.lhervier.ksp.bulldozermod.terrain
             return Math.Acos(dot);
         }
 
+        // A cap of angular radius asin(sinAlpha) is entirely outside a half-space when its center sits
+        // further than 90 deg + that radius from the inward normal. Conservative at the corners: a cap
+        // sitting diagonally past one may clear all four tests without actually touching the quad. That way
+        // round is harmless (one useless decal); the other way would leave scatters behind.
+        private static bool Touches(Vector3d[] planes, Vector3d center, double sinAlpha)
+        {
+            for (int i = 0; i < 4; i++)
+            {
+                if (Vector3d.Dot(center, planes[i]) < -sinAlpha)
+                {
+                    return false;
+                }
+            }
+            return true;
+        }
     }
 }

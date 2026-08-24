@@ -5,6 +5,7 @@ using UnityEngine;
 using Parallax;
 using Parallax.PQS_Mods;
 using com.github.lhervier.ksp.shared;
+using com.github.lhervier.ksp.bulldozermod.terrain;
 
 namespace com.github.lhervier.ksp.bulldozermod.diagnostics
 {
@@ -185,11 +186,6 @@ namespace com.github.lhervier.ksp.bulldozermod.diagnostics
         // the quad actually carrying the vessel is missing from the scatter system entirely.
         private void DumpNearestQuads(CelestialBody body, Vector3d vesselDir)
         {
-            double quadEdge = (System.Math.PI * 0.5 * body.pqsController.radius)
-                              / System.Math.Pow(2.0, body.pqsController.maxLevel);
-            LOGGER.LogInfo($"  quad edge at maxLevel={body.pqsController.maxLevel}: {quadEdge:F0} m " +
-                           $"(half-diagonal {quadEdge * 0.70710678:F0} m)");
-
             // Snapshot into a local list: Parallax's dictionary is its live state and must not be touched.
             List<KeyValuePair<PQ, double>> ranked = new List<KeyValuePair<PQ, double>>();
             foreach (var entry in ScatterComponent.scatterQuadData)
@@ -204,6 +200,25 @@ namespace com.github.lhervier.ksp.bulldozermod.diagnostics
                 ranked.Add(new KeyValuePair<PQ, double>(quad, angle));
             }
             ranked.Sort((a, b) => a.Value.CompareTo(b.Value));
+
+            // MEASURED on the nearest quad, never computed. The (pi/2 * R) / 2^maxLevel formula
+            // UNDER-estimates a quad by up to 27% (a PQS is a projected cube, so quads are even on the face
+            // plane, not in angle) — printing it as if it were the quad's size is how a log reader ends up
+            // hunting the wrong distance. Measured on the Mun at maxLevel 9: formula 614 m, real 728 x 754 m
+            // here, and 313 x 478 m near a cube corner. It stays only as a labelled reference point.
+            QuadLocator.QuadShape shape;
+            if (ranked.Count > 0 && QuadLocator.TryMeasureShape(body, ranked[0].Key, out shape))
+            {
+                LOGGER.LogInfo($"  nearest quad measured at maxLevel={body.pqsController.maxLevel}: " +
+                               $"{shape.sideA:F0} x {shape.sideB:F0} m, half-diagonal " +
+                               $"{shape.halfDiagonalMin:F0}..{shape.halfDiagonalMax:F0} m " +
+                               $"(the {QuadLocator.NominalQuadEdge(body.pqsController):F0} m formula " +
+                               $"under-estimates — never size anything with it)");
+            }
+            else
+            {
+                LOGGER.LogInfo($"  quad shape not measurable at maxLevel={body.pqsController.maxLevel}");
+            }
 
             int count = System.Math.Min(5, ranked.Count);
             for (int i = 0; i < count; i++)

@@ -22,11 +22,27 @@ namespace com.github.lhervier.ksp.bulldozermod
         private static readonly ModLogger LOGGER = new ModLogger("CleanModule");
 
         // Radius (m) actually cleared around the vessel. Hard-coded for now.
-        private const double ClearRadius = 20.0;
+        //
+        // 40 and not 20, because Parallax's big scatters are CLUSTER models (Mun-HugeRocks is
+        // "clusterhuge"): one instance is a group of boulders spread over tens of meters, and the block map
+        // removes the instance whose ANCHOR falls inside the disk. A cluster anchored just outside keeps
+        // throwing boulders inward, so what actually comes out clean is roughly `radius - cluster extent`.
+        // Measured on the Mun: at 20 m a boulder survived 5 m from the rover; at 40 m and 60 m it was clean,
+        // putting the extent at 15-25 m. See "PIEGE - les gros scatters sont des GRAPPES" in the README.
+        //
+        // Public on purpose: QuadOverlay announces what a click WOULD do, so it has to read this very value.
+        // A copy over there would drift and make the overlay lie in silence — it would predict 2 impacted
+        // quads where the click touches 4.
+        public const double ClearRadius = 40.0;
 
-        // Below this, the disk is only a handful of pixels in the mask (~0.7 m/pixel), so we refuse instead
-        // of producing a ragged blob.
-        private const double MinimumRadius = 5.0;
+        // Below this the disk spans only a few mask cells (one cell = ScatterMask.MetersPerPixel), so we
+        // refuse rather than produce a blob. Three cells is where bilinear filtering plus the shader's 0.5
+        // threshold still reconstruct something round.
+        //
+        // Deliberately NOT raised to the cluster margin described above: a smaller radius still clears the
+        // small scatters correctly, it just leaves the big clusters standing. That is a documented tradeoff
+        // for the player to make, not an error to refuse.
+        private const double MinimumRadius = 3.0 * ScatterMask.MetersPerPixel;
 
         // Dedicated reload save (NOT "persistent"): the reload is a mod manoeuvre, not a save the player
         // asked for, and a scene-exit autosave to "persistent" could clobber it. Same as KSP-ReRoot.
