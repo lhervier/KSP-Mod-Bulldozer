@@ -13,6 +13,9 @@
     <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
     <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
     <Deterministic>false</Deterministic>
+    <!-- ParallaxContinued.dll is built against .NET 4.8 while this mod (like its siblings) targets 4.7.2.
+         The gap is a compile-time check only: KSP's Mono runtime loads both all the same. -->
+    <ResolveAssemblyReferenceIgnoreTargetFrameworkAttributeVersionMismatch>true</ResolveAssemblyReferenceIgnoreTargetFrameworkAttributeVersionMismatch>
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies.net472" Version="1.0.3">
@@ -23,6 +26,12 @@
   <ItemGroup>
     <Reference Include="Assembly-CSharp">
       <HintPath>$(KSP_DATA_DIR)\Managed\Assembly-CSharp.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <!-- ParallaxContinued is a hard requirement: without it there is no scatter to clear. Referencing it
+         turns any API change on its side into a build error rather than a runtime failure in flight. -->
+    <Reference Include="ParallaxContinued">
+      <HintPath>$(KSPDIR)\GameData\ParallaxContinued\Plugins\ParallaxContinued.dll</HintPath>
       <Private>false</Private>
     </Reference>
     <Reference Include="Assembly-CSharp-firstpass">
@@ -61,5 +70,6 @@
          KSP-Shared\Src\**\*.cs if/when this mod needs the uGUI library. -->
     <Compile Include="KSP-Shared\Src\shared\Constants.cs" />
     <Compile Include="KSP-Shared\Src\shared\ModLogger.cs" />
+    <Compile Include="KSP-Shared\Src\shared\ModLocalization.cs" />
   </ItemGroup>
 </Project>
