@@ -56,7 +56,7 @@ D'où le **découplage des deux rayons** (`ScatterCleaner.FootprintMargin` pour 
 
 | | Rôle | Valeur |
 |---|---|---|
-| `radius` du PQSMod | **emprise** : capture les quads + définit l'espace UV du masque | `quadHalfDiag × FootprintMargin` (1,1) — **~1090 m sur Kerbin**, ~610 m sur la Mun |
+| `radius` du PQSMod | **emprise** : capture les quads + définit l'espace UV du masque | `halfDiag` **du quad** × `FootprintMargin` (1,1) — **~1090 m sur Kerbin**, ~610 m sur la Mun |
 | disque dessiné dans le masque | **la zone réellement nettoyée** | ce que demande le joueur (20 m) |
 
 La résolution du masque se déduit des deux : l'emprise (2×`radius`) étalée sur la texture. Elle n'est **pas** un réglage libre — voir « Taille du masque » ci-dessous.
@@ -113,7 +113,7 @@ Deux défauts symétriques : Eve rendait le disque minimal sur 5 pixels, pendant
 **Règle retenue : la texture est dimensionnée pour qu'un pixel vaille toujours un carré de 5 m × 5 m au sol.**
 
 ```
-côté couvert = 2 × footprint = 2 × quadHalfDiag × FootprintMargin
+côté couvert = 2 × footprint = 2 × halfDiag(quad) × FootprintMargin
 MaskSize     = round(côté couvert / 5)     borné à [32, 2048]
 ```
 
@@ -131,7 +131,7 @@ Contre **8 Mo par quad partout** aujourd'hui. Les bornes ne sont que des garde-f
 
 **La mémoire compte double.** `ScatterMask` retient le `byte[] _pixels` (pour les `DrawDisk` suivants) *et* la `Texture2D`. Les chiffres ci-dessus incluent les deux ; le commentaire du fichier qui annonce « 4 Mo par quad » ne comptait que la texture.
 
-**La taille est dérivée, jamais persistée.** Elle se recalcule au chargement depuis le `quadHalfDiag` de l'action, puisque les masques sont reconstruits en rejouant les disques. La stocker exposerait à un changement de preset de détail (`maxLevel` change → l'arête change → la taille attendue change) — ce que le garde-fou `action.maxLevel` détecte et refuse déjà.
+**La taille est dérivée, jamais persistée.** Elle se recalcule au chargement depuis le `halfDiag` du quad, puisque les masques sont reconstruits en rejouant les disques. La stocker exposerait à un changement de preset de détail (`maxLevel` change → l'arête change → la taille attendue change) — ce que le garde-fou `action.maxLevel` détecte et refuse déjà.
 
 **La grille est propre à chaque quad.** Chaque masque a son origine et son orientation (`rot` dépend du centre du quad), donc les cases de deux quads voisins **ne sont pas alignées** : une zone à cheval peut faire un décrochement d'au plus une case (5 m) à la couture. C'est assumé — chercher à construire une grille globale se heurterait à la torsion mal conditionnée de `FromToRotation` près des pôles du corps, pour un gain nul sur du retrait de cailloux.
 
@@ -209,7 +209,9 @@ Trois niveaux de piège, les deux premiers déjà payés en jeu (Mun, `maxLevel 
 
 **Où tester :** les 8 coins du cube sont à **lat ±35,26°** (soit `arctan(1/√2)`), **lon 45 / 135 / 225 / 315°**. C'est là que le maillage est le plus déformé — et non aux pôles, qui tombent au centre des faces `Yp`/`Yn` et sont au contraire l'endroit le **plus régulier** (tangent à la sphère, échelle 1, isotrope).
 
-D'où le test exact décrit plus haut : les quatre coins viennent de `PQ.quadMatrix`, sans rien mesurer ni supposer de la forme. `QuadLocator.TryMeasureShape` mesure en plus les deux côtés **séparément**, et les deux demi-diagonales extrêmes (elles ne sont égales que sur un vrai rectangle : leur écart affiche le biais) — pour le diagnostic uniquement. La plus grande demi-diagonale **voyage dans l'action** (`quadHalfDiag`) : au chargement il n'y a aucun quad à mesurer, et c'est elle qui dimensionne l'emprise du decal. Sans elle l'action est **ignorée avec un avertissement** — il n'existe aucune formule de repli sûre, `NominalQuadEdge` étant précisément le piège n°1.
+D'où le test exact décrit plus haut : les quatre coins viennent de `PQ.quadMatrix`, sans rien mesurer ni supposer de la forme. `QuadLocator.TryMeasureShape` mesure en plus les deux côtés **séparément**, et les deux demi-diagonales extrêmes (elles ne sont égales que sur un vrai rectangle : leur écart affiche le biais) — pour le diagnostic uniquement. La plus grande demi-diagonale **voyage avec chaque quad de l'action** (`halfDiag` du nœud `QUAD`) : au chargement il n'y a aucun quad à mesurer, et c'est elle qui dimensionne l'emprise de son decal. Sans elle le quad est **ignoré avec un avertissement** — il n'existe aucune formule de repli sûre, `NominalQuadEdge` étant précisément le piège n°1.
+
+**Une valeur par quad, et non un maximum par action.** Un maximum resterait *correct* — sur-dimensionner une emprise ne casse rien : la résolution du masque est tenue à 5 m/pixel quelle que soit sa taille, `DrawDisk` projette avec le rayon que le shader relit, et l'appartenance d'un quad se joue sur la distance au centre dans `BulldozerScatterDecal.OnQuadPreBuild`, jamais sur le rayon. Il ne coûterait que de la mémoire de masque (∝ rayon²) sur les quads plus petits que le plus gros de l'action — négligeable entre voisins, mais pas si une zone enjambe une arête du cube (313 m contre 781 m sur la Mune). Mesurer par quad supprime la question, et rend `FindImpactedQuads` auto-descriptive : une liste de quads décrits chacun, sans paramètre de sortie agrégé.
 
 ### PIÈGE — les gros scatters sont des GRAPPES, pas des rochers
 
@@ -268,7 +270,7 @@ Le squelette de persistance et d'application « à froid » a été conservé ; 
 | `Src/terrain/QuadLocator.cs` | Géométrie des quads : arête, demi-diagonale, et **quels quads-feuilles un disque touche** (en vol uniquement) |
 | `Src/terrain/ScatterMask.cs` | Le masque d'un decal (`Texture2D` 2048² en R8) et la projection lat/lon → pixel ; `DrawDisk` sert aussi bien à créer qu'à fusionner |
 | `Src/terrain/ScatterCleaner.cs` | Purge nos decals, **regroupe les disques par quad** (un decal chacun), `ResetAndWait` des corps touchés |
-| `Src/persistence/BulldozerAction.cs` | Une action `{ body, lat, lon, radius, maxLevel, QUAD* }` |
+| `Src/persistence/BulldozerAction.cs` | Une action `{ body, lat, lon, radius, maxLevel, QUAD*{ dir, halfDiag } }` |
 | `Src/persistence/BulldozerScenario.cs` | `ScenarioModule` (`AddToAllGames`) : source de vérité par save ; son `OnLoad` déclenche l'injection |
 | `Src/diagnostics/QuadOverlay.cs` | **Outil de test** : affichage en vol des quads voisins (MOD+B) — voir ci-dessous |
 | `Src/diagnostics/BulldozerScatterDiagnostic.cs` | **Outil de test** : dump complet de la chaîne dans `KSP.log`, 8 s après l'entrée en vol |

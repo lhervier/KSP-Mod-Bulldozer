@@ -24,16 +24,26 @@ namespace com.github.lhervier.ksp.bulldozermod.persistence
         /// <summary>PQS maxLevel when the quads below were captured. A change invalidates them.</summary>
         public int maxLevel;
 
-        /// <summary>
-        /// Largest half-diagonal (m) among the impacted leaf quads, measured in flight. Carried here
-        /// because there are no quads to measure at load time, and it cannot be derived from maxLevel
-        /// either — quads are neither square nor uniform across a cube face. See QuadLocator.HalfDiagonal.
-        /// Without it an action cannot be replayed: there is no safe formula to fall back on.
-        /// </summary>
-        public double quadHalfDiagonal;
+        /// <summary>One impacted leaf quad: where it is, and how big it is.</summary>
+        public struct ImpactedQuad
+        {
+            /// <summary>
+            /// Center direction in body frame, straight from PQ.positionPlanetRelative. Deliberately not
+            /// lat/lon: see QuadLocator.QuadRef for why that round-trip is unsafe.
+            /// </summary>
+            public Vector3d direction;
 
-        /// <summary>Center direction (body frame) of each impacted leaf quad.</summary>
-        public readonly List<Vector3d> quads = new List<Vector3d>();
+            /// <summary>
+            /// Half-diagonal (m) of THIS quad, measured in flight. Carried here because there are no quads
+            /// to measure at load time, and it cannot be derived from maxLevel either — quads are neither
+            /// square nor uniform across a cube face. See QuadLocator.HalfDiagonal. Without it the quad
+            /// cannot be replayed: there is no safe formula to fall back on.
+            /// </summary>
+            public double halfDiagonal;
+        }
+
+        /// <summary>The leaf quads the disk covers.</summary>
+        public readonly List<ImpactedQuad> quads = new List<ImpactedQuad>();
 
         public void Save(ConfigNode node)
         {
@@ -42,11 +52,11 @@ namespace com.github.lhervier.ksp.bulldozermod.persistence
             node.AddValue("lon", lon);
             node.AddValue("radius", radius);
             node.AddValue("maxLevel", maxLevel);
-            node.AddValue("quadHalfDiag", quadHalfDiagonal);
-            foreach (Vector3d quad in quads)
+            foreach (ImpactedQuad quad in quads)
             {
-                // The raw direction, not lat/lon: see QuadLocator.QuadRef for why the round-trip is unsafe.
-                node.AddNode("QUAD").AddValue("dir", ConfigNode.WriteVector(quad));
+                ConfigNode quadNode = node.AddNode("QUAD");
+                quadNode.AddValue("dir", ConfigNode.WriteVector(quad.direction));
+                quadNode.AddValue("halfDiag", quad.halfDiagonal);
             }
         }
 
@@ -59,19 +69,30 @@ namespace com.github.lhervier.ksp.bulldozermod.persistence
             node.TryGetValue("lon", ref a.lon);
             node.TryGetValue("radius", ref a.radius);
             node.TryGetValue("maxLevel", ref a.maxLevel);
-            node.TryGetValue("quadHalfDiag", ref a.quadHalfDiagonal);
             if (string.IsNullOrEmpty(a.bodyName))
             {
                 return null;
             }
 
+            // Saves written before the half-diagonal became per-quad carry a single action-wide maximum.
+            // It is >= every member's own value, so it stays a valid (merely generous) fallback.
+            double legacyHalfDiagonal = 0.0;
+            node.TryGetValue("quadHalfDiag", ref legacyHalfDiagonal);
+
             foreach (ConfigNode quadNode in node.GetNodes("QUAD"))
             {
                 string dir = quadNode.GetValue("dir");
-                if (!string.IsNullOrEmpty(dir))
+                if (string.IsNullOrEmpty(dir))
                 {
-                    a.quads.Add(ConfigNode.ParseVector3D(dir));
+                    continue;
                 }
+                double halfDiagonal = legacyHalfDiagonal;
+                quadNode.TryGetValue("halfDiag", ref halfDiagonal);
+                a.quads.Add(new ImpactedQuad
+                {
+                    direction = ConfigNode.ParseVector3D(dir),
+                    halfDiagonal = halfDiagonal
+                });
             }
             return a;
         }

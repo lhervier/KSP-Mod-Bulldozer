@@ -107,9 +107,8 @@ namespace com.github.lhervier.ksp.bulldozermod.diagnostics
             sb.AppendLine("");
             sb.AppendLine($"spread over {shown}: {spread:F1} m");
 
-            double halfDiagonal;
             List<QuadLocator.QuadRef> impacted = QuadLocator.FindImpactedQuads(
-                body, vessel.latitude, vessel.longitude, BulldozerCleanModule.ClearRadius, out halfDiagonal);
+                body, vessel.latitude, vessel.longitude, BulldozerCleanModule.ClearRadius);
 
             // The two sides are shown separately on purpose: a quad is not square, and the gap between them
             // grows towards the edges of a cube face (1.41x at 45 deg). The two half-diagonals expose the
@@ -129,13 +128,26 @@ namespace com.github.lhervier.ksp.bulldozermod.diagnostics
             sb.AppendLine($"a {BulldozerCleanModule.ClearRadius:F0} m clean here would touch {impacted.Count} quad(s)");
 
             // What the decals would actually allocate, so a body with tiny or huge quads shows up here
-            // rather than as a memory surprise.
+            // rather than as a memory surprise. Each quad is sized on its own half-diagonal, so the total is
+            // reported alongside the biggest one rather than a single figure "each".
             if (impacted.Count > 0)
             {
-                double footprint = halfDiagonal * ScatterCleaner.FootprintMargin;
-                int px = ScatterMask.SizeFor(footprint);
-                sb.AppendLine($"mask {px}px over {2.0 * footprint:F0} m " +
-                              $"({2.0 * footprint / px:F2} m/px, {2L * px * px / 1024L} Ko each)");
+                double biggest = 0.0;
+                long kilobytes = 0L;
+                foreach (QuadLocator.QuadRef quad in impacted)
+                {
+                    double quadFootprint = quad.halfDiagonal * ScatterCleaner.FootprintMargin;
+                    if (quadFootprint > biggest)
+                    {
+                        biggest = quadFootprint;
+                    }
+                    int quadPx = ScatterMask.SizeFor(quadFootprint);
+                    kilobytes += 2L * quadPx * quadPx / 1024L;
+                }
+
+                int px = ScatterMask.SizeFor(biggest);
+                sb.AppendLine($"largest mask {px}px over {2.0 * biggest:F0} m " +
+                              $"({2.0 * biggest / px:F2} m/px), {kilobytes} Ko total");
             }
             return sb.ToString();
         }

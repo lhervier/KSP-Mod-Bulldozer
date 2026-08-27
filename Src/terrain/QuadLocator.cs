@@ -33,6 +33,12 @@ namespace com.github.lhervier.ksp.bulldozermod.terrain
             /// </summary>
             public Vector3d direction;
 
+            /// <summary>
+            /// Distance (m) from the center of THIS quad to its furthest corner. Measured here because there
+            /// is no quad left to measure at load time, and it is what sizes the decal covering it.
+            /// </summary>
+            public double halfDiagonal;
+
             /// <summary>The decal that already owns this quad, or null. Only meaningful in flight.</summary>
             public PQSMod_MapDecalVertexRemoveScatter owner;
         }
@@ -82,18 +88,16 @@ namespace com.github.lhervier.ksp.bulldozermod.terrain
 
         /// <summary>
         /// Returns the leaf quads a disk of <paramref name="radius"/> meters centered on
-        /// <paramref name="lat"/>/<paramref name="lon"/> touches, with their current owner when they already
-        /// carry an exclusion decal. <paramref name="halfDiagonal"/> reports the largest half-diagonal among
-        /// them, which is what sizes the decals at injection time.
+        /// <paramref name="lat"/>/<paramref name="lon"/> touches — each with its own half-diagonal, which is
+        /// what sizes the decal covering it at injection time — and with their current owner when they
+        /// already carry an exclusion decal.
         ///
         /// Quads come from Parallax's own registry: only quads it tracks can carry scatters, so any other
         /// quad is irrelevant to us.
         /// </summary>
-        public static List<QuadRef> FindImpactedQuads(CelestialBody body, double lat, double lon, double radius,
-                                                      out double halfDiagonal)
+        public static List<QuadRef> FindImpactedQuads(CelestialBody body, double lat, double lon, double radius)
         {
             List<QuadRef> found = new List<QuadRef>();
-            halfDiagonal = 0.0;
 
             PQS sphere = body.pqsController;
             if (sphere == null)
@@ -130,18 +134,13 @@ namespace com.github.lhervier.ksp.bulldozermod.terrain
                     continue;
                 }
 
-                double half = HalfDiagonal(body, corners, quadCenter);
-                if (half > halfDiagonal)
-                {
-                    halfDiagonal = half;
-                }
-
                 PQSMod_MapDecalVertexRemoveScatter owner;
                 PQSMod_MapDecalVertexRemoveScatter.maskedScattersPerQuad.TryGetValue(quad, out owner);
 
                 found.Add(new QuadRef
                 {
                     direction = quadCenter,
+                    halfDiagonal = HalfDiagonal(body, corners, quadCenter),
                     owner = owner
                 });
             }

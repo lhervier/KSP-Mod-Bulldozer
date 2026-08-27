@@ -79,9 +79,9 @@ namespace com.github.lhervier.ksp.bulldozermod.terrain
                 }
 
                 Vector3d diskDirection = body.GetRelSurfaceNVector(action.lat, action.lon);
-                foreach (Vector3d quad in action.quads)
+                foreach (BulldozerAction.ImpactedQuad quad in action.quads)
                 {
-                    BulldozerScatterDecal decal = GetOrCreateDecal(body, quad, action.quadHalfDiagonal, decals);
+                    BulldozerScatterDecal decal = GetOrCreateDecal(body, quad, decals);
                     if (decal == null)
                     {
                         continue;
@@ -109,11 +109,21 @@ namespace com.github.lhervier.ksp.bulldozermod.terrain
         }
 
         // Returns the decal owning that quad, creating it (with an empty mask) on first use.
+        //
+        // The first action to reach a quad is the one that sizes its decal, and later ones take it as it is.
+        // That is safe because the half-diagonal describes the QUAD, not the action: every action touching
+        // this quad measured the same geometry, so they all ask for the same footprint. (Actions written
+        // before the measurement became per-quad carry an action-wide maximum instead — larger, never
+        // smaller, so an over-sized footprint is the worst that can happen. It costs mask memory and
+        // nothing else: the mask keeps a constant meters-per-pixel, DrawDisk projects through the same
+        // radius the shader reads back, and quad ownership is decided by center distance in
+        // BulldozerScatterDecal.OnQuadPreBuild, never by the radius.)
         private static BulldozerScatterDecal GetOrCreateDecal(CelestialBody body,
-                                                              Vector3d quadCenter,
-                                                              double quadHalfDiagonal,
+                                                              BulldozerAction.ImpactedQuad quad,
                                                               Dictionary<string, BulldozerScatterDecal> decals)
         {
+            Vector3d quadCenter = quad.direction;
+
             // Rounding the direction gives quad centers described by two different actions the same key —
             // that is the whole merge. 9 decimals on a unit vector is millimetric on any body.
             string key = $"{body.name}:{quadCenter.x:F9}:{quadCenter.y:F9}:{quadCenter.z:F9}";
@@ -131,15 +141,15 @@ namespace com.github.lhervier.ksp.bulldozermod.terrain
                 return null;
             }
 
-            // The half-diagonal is measured in flight and travels in the action. There is NO fallback on
+            // The half-diagonal is measured in flight and travels with the quad. There is NO fallback on
             // purpose: the only formula available at load time under-estimates a quad by up to 27% (a PQS is
             // a projected cube), so it would build a mask too small for its own quad, silently.
-            if (quadHalfDiagonal <= 0.0)
+            if (quad.halfDiagonal <= 0.0)
             {
-                LOGGER.LogWarning($"Action on '{body.name}' carries no quad half-diagonal — quad skipped");
+                LOGGER.LogWarning($"Quad on '{body.name}' carries no half-diagonal — quad skipped");
                 return null;
             }
-            double footprint = quadHalfDiagonal * FootprintMargin;
+            double footprint = quad.halfDiagonal * FootprintMargin;
 
             // Child of the PQS: SetupMods()/GetChildMods() collect PQSMods from the sphere's children.
             GameObject go = new GameObject(DecalGoName);

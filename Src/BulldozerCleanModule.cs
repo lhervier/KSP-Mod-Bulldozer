@@ -122,9 +122,8 @@ namespace com.github.lhervier.ksp.bulldozermod
 
             // The quads are captured HERE, in flight: at load time the terrain is not built yet and their
             // geometry cannot be recovered.
-            double quadHalfDiagonal;
             List<QuadLocator.QuadRef> quads = QuadLocator.FindImpactedQuads(
-                body, vessel.latitude, vessel.longitude, ClearRadius, out quadHalfDiagonal);
+                body, vessel.latitude, vessel.longitude, ClearRadius);
             if (quads.Count == 0)
             {
                 LOGGER.LogError("No leaf quad found under the vessel — is the terrain fully built?");
@@ -151,17 +150,19 @@ namespace com.github.lhervier.ksp.bulldozermod
                 lat = vessel.latitude,
                 lon = vessel.longitude,
                 radius = ClearRadius,
-                maxLevel = body.pqsController.maxLevel,
-                quadHalfDiagonal = quadHalfDiagonal
+                maxLevel = body.pqsController.maxLevel
             };
             foreach (QuadLocator.QuadRef quad in quads)
             {
-                action.quads.Add(quad.direction);
+                action.quads.Add(new BulldozerAction.ImpactedQuad
+                {
+                    direction = quad.direction,
+                    halfDiagonal = quad.halfDiagonal
+                });
             }
             BulldozerScenario.Instance.AddAction(action);
             LOGGER.LogInfo($"Recorded action on {body.name} lat={action.lat:F5} lon={action.lon:F5} " +
-                           $"radius={action.radius:F0}m over {action.quads.Count} quad(s), " +
-                           $"quad half-diagonal {quadHalfDiagonal:F0} m");
+                           $"radius={action.radius:F0}m over {action.quads.Count} quad(s)");
 
             // The new action is serialized through the scenario's OnSave. Nothing else is patched: the vessel
             // keeps its saved pose, and since no terrain height changes it reappears exactly where it was.
