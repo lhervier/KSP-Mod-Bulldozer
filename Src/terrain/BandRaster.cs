@@ -1,3 +1,4 @@
+using System;
 using UnityEngine;
 
 namespace com.github.lhervier.ksp.bulldozermod.terrain
@@ -90,6 +91,30 @@ namespace com.github.lhervier.ksp.bulldozermod.terrain
             double u = (rotated.x * _bodyRadius / _decalRadius + 1.0) * 0.5;
             double v = (rotated.z * _bodyRadius / _decalRadius + 1.0) * 0.5;
             return new Vector2((float)(u * _size), (float)(v * _size));
+        }
+
+        /// <summary>
+        /// Surface direction of a cell's center — the inverse of <see cref="PixelOf"/>.
+        ///
+        /// The projection Parallax uses is orthographic onto the decal's tangent plane, so it inverts by
+        /// putting the point back on the unit sphere and undoing the decal's rotation. Cells outside the
+        /// inscribed disk have no direction at all; they are pinned to the horizon rather than refused,
+        /// which is harmless because the strip never reaches that far into a mask sized on its own quad.
+        ///
+        /// Carried through float, like <see cref="PixelOf"/> itself: that is ~6 cm on the Mun, two orders
+        /// below the 5 m cell this locates.
+        /// </summary>
+        public Vector3d DirectionOf(int x, int y)
+        {
+            double scale = _decalRadius / _bodyRadius;
+            double localX = ((x + 0.5) * 2.0 / _size - 1.0) * scale;
+            double localZ = ((y + 0.5) * 2.0 / _size - 1.0) * scale;
+            double squared = 1.0 - localX * localX - localZ * localZ;
+            double localY = squared > 0.0 ? Math.Sqrt(squared) : 0.0;
+
+            Vector3 direction = Quaternion.Inverse(_rot)
+                                * new Vector3((float)localX, (float)localY, (float)localZ);
+            return new Vector3d(direction.x, direction.y, direction.z);
         }
 
         /// <summary>

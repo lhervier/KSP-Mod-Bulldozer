@@ -125,7 +125,7 @@ Les corps en gras sont **mesurés en jeu** (dumps du 2026-08-27, terrain detail 
 
 **Aucune des deux bornes n'est atteinte en stock, et c'est mesuré aux deux bouts.** Le plafond demanderait une arête de quad > 6,5 km, quand le plus gros corps rocheux — Eve — en mesure 1,3 km (403 px pour un plafond à 2048). Le plancher demanderait une arête < ~103 m, quand le plus petit — Gilly — en mesure 190. Les deux bornes ne servent donc qu'aux corps ajoutés (Kopernicus). Le contrat « 1 px = 5 m » tient sur toute l'échelle stock.
 
-**Pas d'arrondi à la puissance de deux.** C'est la seule vraie source d'imprécision sur les 5 m : arrondir 346 → 512 sur Kerbin donnerait des cases de **3,4 m** (32 % d'écart) quand 60 → 64 sur Gilly donnerait 4,7 m (6 %) — un décalage différent sur chaque corps. Avec la taille exacte, l'écart tombe sous le millième (le simple arrondi à l'entier), et une `Texture2D` NPOT en bilinéaire + clamp ne pose aucun problème. Et les 5 m **sont** un contrat de gameplay : les deux curseurs avancent d'une case à la fois, et le quota des lames à venir se comptera en cases (§6). L'arrondi exact n'est donc pas un luxe.
+**Pas d'arrondi à la puissance de deux.** C'est la seule vraie source d'imprécision sur les 5 m : arrondir 346 → 512 sur Kerbin donnerait des cases de **3,4 m** (32 % d'écart) quand 60 → 64 sur Gilly donnerait 4,7 m (6 %) — un décalage différent sur chaque corps. Avec la taille exacte, l'écart tombe sous le millième (le simple arrondi à l'entier), et une `Texture2D` NPOT en bilinéaire + clamp ne pose aucun problème. Et les 5 m **sont** un contrat de gameplay : les deux curseurs avancent d'une case à la fois, et le quota des lames se compte en cases (§6). L'arrondi exact n'est donc pas un luxe.
 
 **Un seul octet par pixel, et une seule copie.** `ScatterMask` ne garde **pas** de `byte[]` à côté de sa texture : il écrit dans les pixels de la `Texture2D` elle-même, via `GetRawTextureData<byte>()` — qui n'est pas une copie mais une **vue** (`NativeArray<byte>` construit par `ConvertExistingDataToNativeArray(GetWritableImageData(0), …, Allocator.None)`). Les chiffres ci-dessus sont donc `MaskSize²` octets, un point c'est tout. Deux conséquences à ne pas casser : la texture doit rester **lisible** (`Apply(false, false)`, jamais `makeNoLongerReadable: true`, sinon `GetRawTextureData` lève), et la vue se **relit à chaque usage** plutôt que se mettre en cache, sa validité n'étant garantie que jusqu'à la prochaine modification de la texture.
 
@@ -285,7 +285,9 @@ Le squelette de persistance et d'application « à froid » a été conservé ; 
 
 | Fichier | Rôle |
 |---|---|
-| `Src/BulldozerCleanModule.cs` | `PartModule` : entrée PAW **« Passer la lame »** + curseurs **longueur** (5→200 m) et **largeur** (5→20 m), tous deux par pas de 5 m. Construit la bande (cap du navball), relève les quads impactés, applique les règles de refus, enregistre l'action puis save+reload. `TryBuildBand` est **partagé** avec les deux overlays, qui doivent viser la bande exacte du clic. Posé sur tout module de commande par `GameData/BulldozerMod/BulldozerMod.cfg` (patch MM) — provisoire, la vraie pièce sera une lame |
+| `Src/BulldozerCleanModule.cs` | Le `PartModule` des trois lames : entrée PAW **« Passer la lame »**, curseurs **longueur** (5→200 m) et **largeur** (5→20 m) par pas de 5 m, **usure restante** et **coût de la passe** en direct. Construit la bande, relève les quads impactés, applique les règles de refus **et le quota**, débite la lame, enregistre l'action puis save+reload. `TryBuildBand` est **partagé** avec les deux overlays, qui doivent viser la bande exacte du clic |
+| `Src/terrain/PassCost.cs` | Ce qu'une passe coûte : les cases qu'elle ferait passer de blanc à noir, **chacune imputée au seul quad qui la possède**. Repasser sur du propre est gratuit ; nettoyer un terrain sans cailloux est plein tarif |
+| `GameData/BulldozerMod/Parts/*.cfg` | Les trois lames (BD-2 / BD-3 / BD-5). Modèles **provisoires** (panneau stock mis à l'échelle) |
 | `Src/parallax/ParallaxInterop.cs` | Tout ce qu'on fait avec Parallax : pose du decal, liste des scatters d'un corps, purge du registre statique. **Compilé contre `ParallaxContinued.dll`** : une évolution de son API casse le build, pas le vol |
 | `Src/parallax/BulldozerScatterDecal.cs` | Le decal lui-même : sous-classe du PQSMod de Parallax, **attachée à un seul quad** (celui dont elle occupe le centre). `RotationFor` = source unique du `rot` du masque |
 | `Src/parallax/ScatterHighlighter.cs` | L'aperçu, et **la seule chose qui dit la vérité** sur ce qu'une passe enlèvera : pour chaque quad en portée il construit le masque que l'injection construirait (`ScatterCleaner.RasterFor`) et pose au shader sa propre question (bilinéaire, `< 0.5`) à la position de chaque instance. Montre donc la pixelisation, les décrochements de couture et les quads pris par un autre mod. Ne voit que les scatters **collidables** — l'herbe part aussi, sans jamais avoir été surlignée |
@@ -475,27 +477,61 @@ Trois hypothèses avaient été testées et écartées (garde `LoadedSceneIsFlig
 
 Ce qui a débloqué le dossier, ce sont deux observations précises du symptôme plutôt que des essais de correctif : **« c'est collé à l'écran »** (donc ni géométrie mal placée ni ombre, qui resteraient ancrées au sol) et **« le voile rouge est décalé du rocher »** (donc notre transformation, pas le pipeline). Et l'outillage qui les a exploitées : des **interrupteurs en vol** (shader, facteur d'inflation) qui ramènent un essai de 5 minutes de rebuild à une touche.
 
-## 6. Ce qui reste à faire
+## 6. Les lames, et ce qui reste à faire
 
-### La pièce dédiée : trois lames, et un quota de cases
+### Les trois lames : ce qui a été retenu
 
-C'est le gros morceau restant. Elle remplacera le patch ModuleManager sur les modules de commande (`GameData/BulldozerMod/BulldozerMod.cfg`), et elle réglera au passage deux choses que le prototype porte mal : « devant » deviendra non ambigu sans passer par le point de contrôle (§2, « Règles de refus »), et la largeur de passe aura une justification physique.
+Elles remplacent le patch ModuleManager qui posait le module sur tous les modules de commande (`GameData/BulldozerMod/BulldozerMod.cfg`, **supprimé**). Les valeurs sont fixées :
 
-- **Trois modèles à modéliser**, de la plus petite à la plus grande. La taille de la lame **plafonne la largeur** de passe qu'elle autorise — le curseur actuel va de 5 à 20 m, soit 1 à 4 cases.
-- **Chaque lame a un quota de cases**, une case valant 5 × 5 m (la cellule du masque, `ScatterMask.MetersPerPixel`). Chaque passe décompte le nombre de cases réellement effacées ; à zéro, la lame est **usée** et ne nettoie plus.
-- **Les lames sont lourdes.** Il faut les amener sur place, ce qui coûte du delta-v et du gameplay.
+| | BD-2 « Éclaireuse » | BD-3 « Chantier » | BD-5 « Terrassier » |
+|---|---|---|---|
+| Largeur du modèle | 2 m | 3 m | 5 m |
+| Masse | 1,5 t | 3,5 t | 8,0 t |
+| Coût / `entryCost` | 2 400 / 8 000 | 6 000 / 20 000 | 15 000 / 45 000 |
+| Nœud | `specializedConstruction` | `advMetalworks` | `metaMaterials` |
+| **Cases** | **200** | **600** | **2 000** |
+| kg par case | 7,5 | 5,8 | 4,0 |
 
-**Pourquoi ces trois limites — c'est le point important.** Il s'agit d'empêcher qu'on se mette à tracer des autoroutes sur la Mune. Ce serait pratique, mais le coût n'est pas dans la passe, il est dans l'**accumulation** : chaque quad nettoyé porte pour toute la session un `PQSMod` et sa `Texture2D` lisible (**~52 Ko par quad sur la Mune**, mesuré ; une passe touche 4 quads, d'où les « 206 Ko total » que `QuadOverlay` affiche), tous **reconstruits à chaque chargement** par `ScatterCleaner.InjectActions`, et tous parcourus à chaque build de quad par la liste des PQSMods du corps. Une autoroute de plusieurs kilomètres, ce sont des centaines de decals et des dizaines de Mo qui se rejouent à chaque entrée en vol.
+**La largeur du modèle ne plafonne PAS la largeur de passe** — les trois gardent le curseur complet 5→20 m. Un bulldozer fait des allers-retours : une lame de 2 m qui dégage une bande de 20 m ne ment pas. Ce qui sépare les trois modèles est **combien** elles peuvent nettoyer, pas **en une fois**.
 
-Le quota est donc un **garde-fou de performance déguisé en gameplay**, et c'est la bonne façon de le poser : le joueur comprend « ma lame est usée », pas « le mod rame ».
+**Le vrai frein aux autoroutes est la masse, pas le quota.** Le quota borne UNE lame ; la masse borne le nombre de lames qu'on peut poser sur un corps. C'est pour ça que `kg/case` **descend** avec la taille : la progression technologique doit récompenser, sinon personne ne monte en gamme. Ce qu'il faut éviter reste l'**accumulation** : chaque quad nettoyé porte pour toute la session un `PQSMod` et sa `Texture2D` lisible (**~52 Ko par quad sur la Mune**, mesuré ; une passe touche 4 quads, d'où les « 206 Ko total » que `QuadOverlay` affiche), tous **reconstruits à chaque chargement** par `ScatterCleaner.InjectActions`, et tous parcourus à chaque build de quad. Le quota est donc un **garde-fou de performance déguisé en gameplay** : le joueur comprend « ma lame est usée », pas « le mod rame ».
 
-**Ce qui est déjà en place pour le coder** : la case est déjà l'unité du code (les deux curseurs avancent par pas de 5 m = une case), et le nombre de cases effacées est déjà calculé — `ScatterMask.DrawBand` le compte et le journalise (`cells cleared=N`), et `BandRaster.CellCleared` permet de le connaître **avant** de valider. Le quota est donc vérifiable au clic, sans rechargement inutile. Il reste un état de pièce (`isPersistant` sur le PartModule), pas une donnée du `ScenarioModule` : il appartient à la lame, pas à la partie.
+**Ce que les quotas achètent.** Une case déjà noire étant gratuite, une zone compacte de S cases de côté coûte ≈ `S² + 2S` (l'aire, plus son périmètre payé une fois) : **~65 × 65 m**, **~115 × 115 m** et **~215 × 215 m**. Corollaire assumé : des passes **jointives** ne paient presque que leur surface, des passes éparpillées repaient leur périmètre à chaque fois. Une passe isolée de 200 × 5 m coûte ~85 à 100 cases, pas 40.
 
-⚠️ **Attention au double comptage** : deux quads voisins ont des grilles non alignées (§2, « La grille est propre à chaque quad »), donc une passe à cheval fait compter la même bande dans plusieurs masques. Le quota doit se décompter sur la **surface du geste** (longueur × largeur / 25), pas sur la somme des cases effacées par quad — sinon la même passe coûte deux à quatre fois plus cher selon l'endroit où on se trouve.
+⚠️ **Le comptage ne se fait NI sur la surface du geste, NI sur la somme des cases effacées par quad.** Les deux sont faux, pour deux raisons différentes :
+
+- **la surface du geste** (`longueur × largeur / 25`) ferait payer un second passage sur du terrain déjà propre — or c'est précisément ce qu'on veut gratuit ;
+- **la somme par quad** surfacturerait d'un facteur 2 à 4. Un masque couvre l'emprise de son quad, qui **déborde** ce quad (`FootprintMargin`), donc une passe près d'un coin est réellement dessinée dans 2 à 4 masques. Le même geste coûterait alors quatre fois plus cher selon l'endroit où le joueur se tient — invisible pour lui, et injustifiable.
+
+**La règle retenue** (`Src/terrain/PassCost.cs`) : compter les cases qui passent de blanc à noir, **et n'imputer chaque case qu'au quad qui la possède**. L'appartenance est exacte — les quatre demi-espaces de `QuadLocator.TryGetEdgePlanes`, portés par `QuadRef.edgePlanes` — et l'inverse de la projection est `BandRaster.DirectionOf`. Chaque parcelle de sol est donc comptée une fois, à **une case près par couture** traversée (les grilles voisines ne sont pas alignées : une case à cheval peut être comptée deux fois ou zéro).
+
+Trois conséquences voulues : repasser au même endroit ne coûte rien ; une passe posée le long d'une déjà nettoyée ne paie que ce qu'elle ajoute ; et nettoyer un terrain **sans aucun scatter** coûte plein tarif, parce que ce qu'on dépense est le masque, pas les cailloux.
+
+**Écarté le 2026-08-27 : ne facturer que les cases qui contiennent vraiment un rocher.** L'idée est naturelle — `ScatterHighlighter` lit `Parallax.CollisionManager.collisionData` et sait instance par instance ce qui tomberait, donc la donnée existe et le mapping instances → cases tiendrait en vingt lignes. Elle est refusée parce que **cette liste ne décrit pas le sol, elle décrit ce qui est chargé et collidable à cet instant** :
+
+- **les familles non collidables passeraient gratuites** — sur la Mune `TinyRocks` et `SmallRocks` sont bien retirées mais absentes de `collisionData` ; sur Kerbin c'est l'herbe, la famille la plus dense ;
+- **le prix dépendrait de la distance de chargement** : le highlight ne voit que les quads chargés (c'est la limite « viser à l'aveugle » ci-dessous), donc la même passe coûterait moins cher faite de loin, et changerait de prix selon le preset de détail. L'exploit s'écrit tout seul ;
+- **le prix annoncé divergerait du prix débité**, le PAW recalculant 2×/s pendant que les scatters se chargent et se déchargent.
+
+Et au-delà de la technique : **une instance est une grappe ancrée en un point et étalée sur 15-25 m**. Une case sans ancre n'est pas une case sans rocher — elle est souvent nettoyée par la chute d'une grappe voisine. « Cette case n'a rien » n'est pas une propriété qu'on peut lire honnêtement.
+
+Ce qu'on garde à la place : un prix **déterministe et fonction du seul geste**. L'usure paie le **masque** — la vraie ressource rare — pas les cailloux. Et l'information que ce calcul donnerait au joueur, il l'a déjà : le highlight montre ce qui tombe, le coût s'affiche à côté, il peut lire « 65 cases pour trois cailloux » et déplacer sa passe avant de payer.
+
+Le quota est un état de **pièce** (`cellsLeft`, `isPersistant` sur le PartModule), pas une donnée du `ScenarioModule` : il appartient à la lame, pas à la partie. Il est débité **avant** `HighLogic.CurrentGame.Updated()`, sinon le rechargement ramènerait une lame qui n'a pas payé.
+
+**Ce que le joueur voit** : le coût de la passe réglée s'affiche en direct dans le PAW (rafraîchi 2×/s tant que la fenêtre est ouverte), à côté de l'usure restante. Coût > restant → refus chiffré, **sans rechargement** ; coût nul (tout est déjà propre) → refus aussi, pour la même raison : le rechargement est la partie chère d'une passe, pas la lame.
+
+**Les lames ne collisionnent pas** (`disableCollisions`, en vol seulement) : une lame est modélisée au ras du sol, telle quelle elle laboure le terrain et cloue le rover sur place. Rien ici n'a besoin de toucher quoi que ce soit — le nettoyage se décide dans un masque.
+
+⚠️ **Les colliders sont passés en TRIGGER, pas désactivés**, et ce n'est pas un détail : KSP choisit la pièce sous le curseur avec `Physics.RaycastAll` (`Mouse.CheckHoveredPart`, masque `Part.layerMask`), et le `queriesHitTriggers` d'Unity vaut `true` par défaut — KSP ne le change jamais. Un trigger reste donc **cliquable** tout en ne générant aucun contact, là où un collider désactivé est invisible au raycast : **la pièce perd tout son PAW**. Vécu le 2026-08-27, première version.
+
+À savoir au passage : ni l'un ni l'autre ne sort la lame du calcul de `Vessel.getLowestPoint()`, qui **réactive lui-même tous les colliders** le temps de sa mesure avant de restaurer leur état. L'éditeur, lui, garde des colliders normaux, sans quoi la pièce ne serait plus rattrapable une fois posée.
+
+**Modèles : provisoires.** Les trois `.cfg` utilisent l'aile structurelle stock `Aero/wings/structural2` mise à l'échelle. Une **aile**, et non le panneau structurel qui ressemblerait davantage à une lame : Restock retire les modèles de panneaux du game database, la pièce ne compile alors pas et disparaît de l'éditeur sans un mot (voir le piège `MODEL`/Restock dans le [CLAUDE.md parent](../CLAUDE.md)). À remplacer par de vrais maillages ; c'est à ce moment-là que `bladeTransform` prendra son sens (voir « Règles de refus » : il rendra le cap indépendant du point de contrôle) et que `node_attach` devra être refait.
 
 ### Le reste
 - **Viser à l'aveugle.** Le highlight ne montre que les rochers *chargés* : sur une passe de 200 m, le bout de la bande n'est pas prévisualisé. Un tracé de la bande au sol le règlerait — **débloqué** depuis la fermeture des ombres fantômes (§5), qui était la raison du report. Reprendre le matériau et le biais de profondeur de `ScatterHighlighter`, pas un shader choisi au hasard.
-- **Retirer les outils de test** (`Src/diagnostics/`) : `QuadOverlay`, `BulldozerScatterDiagnostic` et `BandDiagnostic`. À garder tant que la lame n'est pas faite — `BandDiagnostic` a payé son écot le 2026-08-27 (il a prouvé la visée et chiffré le bug du cap), et c'est le seul moyen de distinguer « le masque est ailleurs » de « la lame passe entre les cailloux ».
+- **Retirer les outils de test** (`Src/diagnostics/`) : `QuadOverlay`, `BulldozerScatterDiagnostic` et `BandDiagnostic`. À garder tant que les vrais modèles de lame ne sont pas là — `BandDiagnostic` a payé son écot le 2026-08-27 (il a prouvé la visée et chiffré le bug du cap), et c'est le seul moyen de distinguer « le masque est ailleurs » de « la lame passe entre les cailloux ».
 - **Détail terrain : exigence caduque.** On voulait imposer le preset maximum, d'abord pour la finesse (elle vient de la texture, pas du maillage : sans objet), puis parce que la taille des quads en dépend. Les deux raisons sont tombées : l'arête est **mesurée en vol** et voyage dans l'action, et un changement de preset est détecté par la garde `maxLevel` (l'action est alors ignorée avec un avertissement, plutôt qu'appliquée de travers). Reste à décider ce qu'on fait de ces actions orphelines — les recalculer à la première occasion en vol serait plus élégant que de les abandonner.
 - **Bords de zone** : coupure franche ou dégradé dans le masque (le sampler est bilinéaire, un masque adouci suffirait). Sans objet à 5 m de large — une seule case, aucune place pour un dégradé — et de peu d'intérêt à 20 m : le bord perçu est celui des scatters survivants, déjà irrégulier à l'échelle de leur espacement.
 

@@ -99,7 +99,11 @@ namespace com.github.lhervier.ksp.bulldozermod.terrain
                 {
                     direction = quadCenter,
                     halfDiagonal = halfDiagonal,
-                    owner = owner
+                    owner = owner,
+
+                    // Copied out of the scratch buffer: the caller keeps the quad long after this loop has
+                    // reused it. Only for the handful of quads a pass actually touches.
+                    edgePlanes = new[] { planes[0], planes[1], planes[2], planes[3] }
                 });
             }
 

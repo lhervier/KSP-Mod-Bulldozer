@@ -10,16 +10,21 @@ using com.github.lhervier.ksp.bulldozermod.terrain;
 namespace com.github.lhervier.ksp.bulldozermod
 {
     /// <summary>
-    /// PAW entry that clears the scatters (Parallax rocks and the like) along a blade pass: a strip running
-    /// straight ahead of the vessel, as long and as wide as the player picks.
+    /// The bulldozer blade: clears the scatters (Parallax rocks and the like) along a blade pass, a strip
+    /// running straight ahead of the vessel, as long and as wide as the player picks.
     ///
-    /// Patched onto every command module for now — the real thing will be a dedicated bulldozer blade part,
-    /// which is also what will make "straight ahead" unambiguous without asking the control point.
+    /// A blade wears out. Every pass spends the mask cells it turns black, and a blade that runs out stops
+    /// working — see <see cref="PassCost"/> for what that charges and what it does not. That is a
+    /// performance guard wearing a gameplay costume: each cleared quad carries a PQSMod and a readable
+    /// Texture2D for the whole session, all rebuilt at every load, so kilometers of cleared road would cost
+    /// tens of megabytes replayed on every flight scene. "My blade is worn out" is the readable version of
+    /// that.
     ///
-    /// Click flow: work out the strip, check it is clearable, record the pass (with the quads it covers) in
-    /// the per-save ScenarioModule, save to a dedicated file, reload. The decals are injected by the
-    /// scenario's OnLoad while the PQS is still cold. Nothing is applied live: the exclusion is decided when
-    /// Parallax builds a quad's scatters, so it needs a fresh build to take effect.
+    /// Click flow: work out the strip, check it is clearable AND affordable, charge the blade, record the
+    /// pass (with the quads it covers) in the per-save ScenarioModule, save to a dedicated file, reload. The
+    /// decals are injected by the scenario's OnLoad while the PQS is still cold. Nothing is applied live:
+    /// the exclusion is decided when Parallax builds a quad's scatters, so it needs a fresh build to take
+    /// effect.
     /// </summary>
     public class BulldozerCleanModule : PartModule
     {
@@ -34,6 +39,10 @@ namespace com.github.lhervier.ksp.bulldozermod
         // 20 m is the ceiling Lionel set. Worth knowing where it lands: the big scatters are CLUSTERS
         // removed by their anchor, whose extent is 15-25 m, so even at 20 m some boulders keep leaning into
         // the pass. Measured on the Mun, a 200 m pass took out 5-9% of the rocks around it at 5 m wide.
+        //
+        // The SAME ceiling on all three blades, deliberately: a blade is assumed to make several passes back
+        // and forth, so a 2 m blade clearing a 20 m strip is not a lie. What separates the three models is
+        // how much they can clear before wearing out, not how wide a strip they can cover.
         private const float MinWidth = Step;
         private const float MaxWidth = 20f;
 
@@ -46,13 +55,18 @@ namespace com.github.lhervier.ksp.bulldozermod
         // asked for, and a scene-exit autosave to "persistent" could clobber it. Same as KSP-ReRoot.
         private const string ReloadSaveName = "BulldozerReload";
 
+        // How often the announced cost is recomputed while the PAW is open. It walks Parallax's quad
+        // registry and rasterises the strip per quad, so it is not free — but the player needs it to follow
+        // the rover and the sliders, which is what makes a pass fit before it is paid for.
+        private const float CostRefreshInterval = 0.5f;
+
         /// <summary>
         /// Length (m) of the pass the overlays should announce.
         ///
         /// Static because the highlight and the quad overlay are scene-wide addons with no PAW of their own,
-        /// while this value belongs to a part. It follows whichever PAW the player last touched; with several
-        /// command pods, each keeping its own persisted value, a fresh scene leaves whichever started last —
-        /// and the first slider move settles it.
+        /// while this value belongs to a part. It follows whichever PAW the player last touched; with
+        /// several blades, each keeping its own persisted value, a fresh scene leaves whichever started
+        /// last — and the first slider move settles it.
         /// </summary>
         public static double SelectedLength = 50.0;
 
@@ -60,19 +74,76 @@ namespace com.github.lhervier.ksp.bulldozermod
         /// <see cref="SelectedLength"/>.</summary>
         public static double SelectedWidth = DefaultWidth;
 
-        /// <summary>Length (m) of the pass this part would clear. Player setting, persisted per part.</summary>
+        /// <summary>The blade whose PAW was last touched — the one the overlays aim with. Same caveat as
+        /// <see cref="SelectedLength"/>.</summary>
+        public static BulldozerCleanModule Selected;
+
+        /// <summary>Length (m) of the pass this blade would clear. Player setting, persisted per part.</summary>
         [KSPField(isPersistant = true, guiActive = true, guiActiveEditor = false,
                   guiName = "#LOC_BulldozerMod_passLength", guiUnits = "m", guiFormat = "F0")]
         [UI_FloatRange(minValue = MinLength, maxValue = MaxLength, stepIncrement = Step,
                        scene = UI_Scene.Flight)]
         public float passLength = 50f;
 
-        /// <summary>Width (m) of the pass this part would clear. Player setting, persisted per part.</summary>
+        /// <summary>Width (m) of the pass this blade would clear. Player setting, persisted per part.</summary>
         [KSPField(isPersistant = true, guiActive = true, guiActiveEditor = false,
                   guiName = "#LOC_BulldozerMod_passWidth", guiUnits = "m", guiFormat = "F0")]
         [UI_FloatRange(minValue = MinWidth, maxValue = MaxWidth, stepIncrement = Step,
                        scene = UI_Scene.Flight)]
         public float passWidth = DefaultWidth;
+
+        /// <summary>How many mask cells this blade can clear over its whole life. Set per part in the cfg.</summary>
+        [KSPField]
+        public float cellCapacity = 200f;
+
+        /// <summary>
+        /// Cells this blade has left. Persisted per part, because wear belongs to the blade rather than to
+        /// the save — a fresh blade brought along is a fresh quota.
+        ///
+        /// Negative means "never started": the cfg's capacity is what fills it on first start.
+        /// </summary>
+        [KSPField(isPersistant = true)]
+        public float cellsLeft = -1f;
+
+        /// <summary>
+        /// Name of the model transform whose +Z points the way the blade faces, or empty to read the
+        /// vessel's control point instead.
+        ///
+        /// This is the one thing a dedicated part settles for free: a blade knows which way it faces, so
+        /// "ahead" no longer has to be guessed from whatever the player last picked as a control point. Left
+        /// empty on the placeholder models, which carry no such transform.
+        /// </summary>
+        [KSPField]
+        public string bladeTransform = "";
+
+        /// <summary>
+        /// Whether to stop the part's colliders from colliding, in flight.
+        ///
+        /// A blade is modelled down at ground level: left as it is, it ploughs into the terrain and pins the
+        /// rover where it stands. Nothing here needs to touch anything — the clearing is decided in a mask.
+        ///
+        /// The colliders are turned into TRIGGERS rather than switched off, and that is not a detail: KSP
+        /// picks the part under the cursor with Physics.RaycastAll (Mouse.CheckHoveredPart), and Unity's
+        /// queriesHitTriggers defaults to true and is never changed by KSP. A trigger is therefore still
+        /// clickable while generating no contact — whereas a disabled collider is invisible to the raycast,
+        /// which costs the part its PAW entirely.
+        ///
+        /// Flight only: the editor needs real colliders to place the part and to pick it back up.
+        /// </summary>
+        [KSPField]
+        public bool disableCollisions = true;
+
+        /// <summary>Wear left, as the PAW shows it.</summary>
+        [KSPField(guiActive = true, guiActiveEditor = true, guiName = "#LOC_BulldozerMod_bladeWear")]
+        public string wearStatus = "";
+
+        /// <summary>What the pass currently set up would cost, as the PAW shows it.</summary>
+        [KSPField(guiActive = true, guiActiveEditor = false, guiName = "#LOC_BulldozerMod_passCost")]
+        public string costStatus = "";
+
+        private Transform _bladeFace;
+        private bool _bladeFaceResolved;
+        private float _costTimer;
 
         /// <summary>
         /// The strip a pass of <paramref name="length"/> by <paramref name="width"/> meters would clear right
@@ -83,7 +154,7 @@ namespace com.github.lhervier.ksp.bulldozermod
         public static bool TryBuildBand(Vessel vessel, double length, double width, out SurfaceBand band)
         {
             band = new SurfaceBand();
-            if (vessel == null || vessel.mainBody == null || vessel.ReferenceTransform == null)
+            if (vessel == null || vessel.mainBody == null)
             {
                 return false;
             }
@@ -94,21 +165,22 @@ namespace com.github.lhervier.ksp.bulldozermod
             // load then starts exactly where this one does.
             Vector3d origin = body.GetRelSurfaceNVector(vessel.latitude, vessel.longitude);
 
-            // The navball's nose, which is the control point's own +up axis (NavBall targets
-            // ActiveVessel.ReferenceTransform, and ModuleCommand draws its "forward" arrow along
-            // controlPoint.transform.up). So "control from here" aims the pass exactly as it aims the rover,
-            // and the player reads the heading off an instrument that is already on screen.
-            Vector3d nose = body.GetRelSurfaceDirection(vessel.ReferenceTransform.up);
+            Vector3d nose;
+            if (!TryGetNose(vessel, out nose))
+            {
+                return false;
+            }
+
             double vertical = Vector3d.Dot(nose, origin);
             Vector3d heading = nose - origin * vertical;
 
-            // The control axis has to be MORE HORIZONTAL THAN VERTICAL, i.e. within 45 deg of the horizon.
-            // A small threshold does not work, and that is not theoretical: on a slope, a control point
-            // aimed at the SKY still leaves a sizeable horizontal residue — the direction the deck happens
-            // to lean, which is not a heading at all. Measured in game on the Mun with a Mk2 lander can:
-            // its "Up" and "Reversed" control points (orientation 0,0,180, so nose down) both passed a
-            // sin(10 deg) test and sent a 200 m pass off in an arbitrary direction — the two being exactly
-            // 180 deg apart, which is the giveaway that both were reading the same tilt.
+            // The aiming axis has to be MORE HORIZONTAL THAN VERTICAL, i.e. within 45 deg of the horizon.
+            // A small threshold does not work, and that is not theoretical: on a slope, an axis aimed at the
+            // SKY still leaves a sizeable horizontal residue — the direction the deck happens to lean, which
+            // is not a heading at all. Measured in game on the Mun with a Mk2 lander can: its "Up" and
+            // "Reversed" control points (orientation 0,0,180, so nose down) both passed a sin(10 deg) test
+            // and sent a 200 m pass off in an arbitrary direction — the two being exactly 180 deg apart,
+            // which is the giveaway that both were reading the same tilt.
             if (heading.magnitude <= Math.Abs(vertical))
             {
                 return false;
@@ -172,6 +244,18 @@ namespace com.github.lhervier.ksp.bulldozermod
         {
             base.OnStart(state);
 
+            // A blade straight out of the VAB is a full one. Done here rather than in the field initialiser
+            // because the capacity comes from the cfg, which is only merged in by the time OnStart runs.
+            if (cellsLeft < 0f)
+            {
+                cellsLeft = cellCapacity;
+            }
+
+            if (disableCollisions && HighLogic.LoadedSceneIsFlight)
+            {
+                MakeCollidersPassThrough();
+            }
+
             // Nothing to clear without Parallax: hide the entries rather than offer a no-op.
             if (!ParallaxInterop.Available)
             {
@@ -180,6 +264,9 @@ namespace com.github.lhervier.ksp.bulldozermod
                 Events["DumpPass"].guiActive = false;
                 Fields["passLength"].guiActive = false;
                 Fields["passWidth"].guiActive = false;
+                Fields["wearStatus"].guiActive = false;
+                Fields["wearStatus"].guiActiveEditor = false;
+                Fields["costStatus"].guiActive = false;
                 return;
             }
 
@@ -195,8 +282,87 @@ namespace com.github.lhervier.ksp.bulldozermod
                 width.uiControlFlight.onFieldChanged = OnPassChanged;
             }
 
+            SyncWear();
+
             // The flag outlives the scene, so the label has to be re-derived rather than assumed off.
             SyncHighlightLabel();
+        }
+
+        public override void OnUpdate()
+        {
+            base.OnUpdate();
+            if (!ParallaxInterop.Available || cellsLeft <= 0f)
+            {
+                return;
+            }
+
+            // Only while somebody is reading it: the cost is the one thing here that walks the whole quad
+            // registry every time it is refreshed.
+            if (part.PartActionWindow == null)
+            {
+                return;
+            }
+
+            _costTimer -= Time.deltaTime;
+            if (_costTimer > 0f)
+            {
+                return;
+            }
+            _costTimer = CostRefreshInterval;
+            SyncCost();
+        }
+
+        // Which way the pass runs. A blade part answers that itself, through a transform of its own model.
+        //
+        // Falls back to the navball's nose — the control point's own +up axis (NavBall targets
+        // ActiveVessel.ReferenceTransform, and ModuleCommand draws its "forward" arrow along
+        // controlPoint.transform.up) — when no blade has declared one. So "control from here" aims the pass
+        // exactly as it aims the rover, and the player reads the heading off an instrument already on screen.
+        private static bool TryGetNose(Vessel vessel, out Vector3d nose)
+        {
+            nose = Vector3d.zero;
+            CelestialBody body = vessel.mainBody;
+
+            BulldozerCleanModule blade = Selected;
+            if (blade != null && blade.vessel == vessel)
+            {
+                Transform face = blade.BladeFace;
+                if (face != null)
+                {
+                    nose = body.GetRelSurfaceDirection(face.forward);
+                    return true;
+                }
+            }
+
+            if (vessel.ReferenceTransform == null)
+            {
+                return false;
+            }
+            nose = body.GetRelSurfaceDirection(vessel.ReferenceTransform.up);
+            return true;
+        }
+
+        // The model transform this blade faces along, or null when it declares none. Resolved once: the
+        // lookup walks the part's whole hierarchy, and this is read every frame the overlays are on.
+        private Transform BladeFace
+        {
+            get
+            {
+                if (!_bladeFaceResolved)
+                {
+                    _bladeFaceResolved = true;
+                    if (!string.IsNullOrEmpty(bladeTransform))
+                    {
+                        _bladeFace = part.FindModelTransform(bladeTransform);
+                        if (_bladeFace == null)
+                        {
+                            LOGGER.LogWarning($"Blade transform '{bladeTransform}' not found on " +
+                                              $"'{part.partInfo?.name}' — falling back to the control point");
+                        }
+                    }
+                }
+                return _bladeFace;
+            }
         }
 
         // Bound to the module whose slider moved, which is the point: it publishes THAT part's values, so the
@@ -204,12 +370,14 @@ namespace com.github.lhervier.ksp.bulldozermod
         private void OnPassChanged(BaseField field, object oldValue)
         {
             PublishPass();
+            SyncCost();
         }
 
         private void PublishPass()
         {
             SelectedLength = passLength;
             SelectedWidth = passWidth;
+            Selected = this;
         }
 
         // A toggle's label must announce what the NEXT click does, not the current state.
@@ -217,6 +385,68 @@ namespace com.github.lhervier.ksp.bulldozermod
         {
             Events["ToggleHighlight"].guiName =
                 ModLocalization.GetString(ScatterHighlighter.Active ? "highlightOff" : "highlightOn");
+        }
+
+        // Wear left, and whether the blade can still be used at all.
+        private void SyncWear()
+        {
+            wearStatus = ModLocalization.GetString("bladeWearValue",
+                                                   Mathf.RoundToInt(cellsLeft),
+                                                   Mathf.RoundToInt(cellCapacity));
+
+            bool worn = cellsLeft <= 0f;
+            Events["ClearScatters"].guiName = ModLocalization.GetString(worn ? "bladeWorn" : "clearScatters");
+            Events["ClearScatters"].guiActive = !worn;
+            Fields["costStatus"].guiActive = !worn;
+        }
+
+        // What the pass currently set up would cost. Silent about anything it cannot answer: an unusable
+        // heading already has its own refusal message at click time.
+        private void SyncCost()
+        {
+            int cost;
+            costStatus = TryEstimateCost(FlightGlobals.ActiveVessel, out cost)
+                ? ModLocalization.GetString("passCostValue", cost)
+                : ModLocalization.GetString("passCostUnknown");
+        }
+
+        // Cells the pass would newly clear, or false when the strip cannot be worked out at all.
+        private bool TryEstimateCost(Vessel vessel, out int cost)
+        {
+            cost = 0;
+            if (vessel == null || vessel.mainBody == null || vessel.mainBody.pqsController == null)
+            {
+                return false;
+            }
+
+            SurfaceBand band;
+            if (!TryBuildBand(vessel, passLength, passWidth, out band))
+            {
+                return false;
+            }
+
+            cost = PassCost.Compute(vessel.mainBody, band,
+                                    QuadLocator.FindImpactedQuads(vessel.mainBody, band));
+            return true;
+        }
+
+        private void MakeCollidersPassThrough()
+        {
+            int converted = 0;
+            foreach (Collider collider in part.GetComponentsInChildren<Collider>(true))
+            {
+                if (!collider.isTrigger)
+                {
+                    collider.isTrigger = true;
+                    converted++;
+                }
+            }
+            if (converted > 0)
+            {
+                LOGGER.LogInfo($"Turned {converted} collider(s) into triggers on '{part.partInfo?.name}': a " +
+                               "blade sits on the ground and would pin the rover, but it still has to be " +
+                               "clickable");
+            }
         }
 
         private void RecordAndReload()
@@ -238,7 +468,7 @@ namespace com.github.lhervier.ksp.bulldozermod
             SurfaceBand band;
             if (!TryBuildBand(vessel, passLength, passWidth, out band))
             {
-                LOGGER.LogWarning("The control point gives no usable heading — refusing the pass");
+                LOGGER.LogWarning("The blade points nowhere usable — refusing the pass");
                 Warn(ModLocalization.GetString("headingUnusable"));
                 return;
             }
@@ -266,6 +496,27 @@ namespace com.github.lhervier.ksp.bulldozermod
                 }
             }
 
+            int cost = PassCost.Compute(body, band, quads);
+            if (cost <= 0)
+            {
+                // Everything under the strip is already cleared. Nothing to record, and above all nothing
+                // worth a reload — which is the expensive part of a pass, not the blade.
+                LOGGER.LogInfo("Pass would blacken no new cell — nothing to do");
+                Warn(ModLocalization.GetString("nothingToClear"));
+                return;
+            }
+            if (cost > cellsLeft)
+            {
+                LOGGER.LogInfo($"Pass costs {cost} cell(s) but the blade has {cellsLeft:F0} left — refusing");
+                Warn(ModLocalization.GetString("notEnoughWear", cost, Mathf.RoundToInt(cellsLeft)));
+                return;
+            }
+
+            // Charged BEFORE the game is snapshotted below, or the reload would bring back a blade that
+            // never paid for this pass.
+            cellsLeft -= cost;
+            SyncWear();
+
             BulldozerAction action = new BulldozerAction
             {
                 bodyName = body.name,
@@ -287,7 +538,8 @@ namespace com.github.lhervier.ksp.bulldozermod
             BulldozerScenario.Instance.AddAction(action);
             LOGGER.LogInfo($"Recorded pass on {body.name} lat={action.lat:F5} lon={action.lon:F5} " +
                            $"length={action.length:F0}m width={action.width:F0}m " +
-                           $"over {action.quads.Count} quad(s)");
+                           $"over {action.quads.Count} quad(s), {cost} cell(s) charged, " +
+                           $"{cellsLeft:F0} left on the blade");
 
             // The new action is serialized through the scenario's OnSave. Nothing else is patched: the vessel
             // keeps its saved pose, and since no terrain height changes it reappears exactly where it was.

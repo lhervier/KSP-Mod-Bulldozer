@@ -25,5 +25,16 @@ namespace com.github.lhervier.ksp.bulldozermod.terrain
 
         /// <summary>The decal that already owns this quad, or null. Only meaningful in flight.</summary>
         public PQSMod_MapDecalVertexRemoveScatter owner;
+
+        /// <summary>
+        /// Inward normals of the four great-circle planes bounding this quad, as
+        /// <see cref="QuadLocator.TryGetEdgePlanes"/> produces them: a direction is inside the quad when it
+        /// sits on the positive side of all four.
+        ///
+        /// Carried per quad rather than recomputed, because it is only obtainable in flight (it comes from
+        /// PQ.quadMatrix), and because it is what tells which mask OWNS a patch of ground — a mask covers a
+        /// footprint larger than its own quad, so the same ground is drawn into several of them.
+        /// </summary>
+        public Vector3d[] edgePlanes;
     }
 }

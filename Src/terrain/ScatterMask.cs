@@ -42,8 +42,11 @@ namespace com.github.lhervier.ksp.bulldozermod.terrain
         private const int MinSize = 32;
         private const int MaxSize = 2048;
 
-        private const byte Keep = 255;
-        private const byte Clear = 0;
+        /// <summary>Cell value that lets the scatter stand (the shader keeps anything >= 0.5).</summary>
+        public const byte Keep = 255;
+
+        /// <summary>Cell value that removes the scatter.</summary>
+        public const byte Clear = 0;
 
         private readonly int _size;
         private readonly Texture2D _texture;
@@ -153,6 +156,21 @@ namespace com.github.lhervier.ksp.bulldozermod.terrain
             LOGGER.LogInfo($"band {band.length:F0} x {band.width:F0} m -> {cleared} cell(s) in " +
                            $"px [{minX}..{maxX}]x[{minY}..{maxY}] of a {_size}px mask of " +
                            $"{2.0 * DecalRadius:F0} m ({2.0 * DecalRadius / _size:F2} m/px)");
+        }
+
+        /// <summary>
+        /// The cells as they stand right now: <see cref="Clear"/> where a pass has already been through,
+        /// <see cref="Keep"/> elsewhere, in row order.
+        ///
+        /// This is what makes a second pass over cleared ground free: it is read to tell the cells a pass
+        /// would newly blacken from the ones it would blacken again.
+        ///
+        /// A VIEW on the texture, not a copy — read it into a local and use it there, it is only guaranteed
+        /// valid until the texture is next modified.
+        /// </summary>
+        public NativeArray<byte> Cells
+        {
+            get { return Pixels; }
         }
 
         /// <summary>Frees the GPU/CPU texture. The mask must not be used afterwards.</summary>
