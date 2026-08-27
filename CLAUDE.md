@@ -435,55 +435,45 @@ Le nom déclaré est **`Parallax`** — celui du `[KSPAssembly]` de Parallax, pa
 
 **Le nettoyage peut être partiel selon l'instant.** Un essai a laissé fleurs et herbes éparses ; le diagnostic montrait alors que le quad portant le vaisseau **n'était pas** pris en charge (le plus proche connu de Parallax était à 752 m, au-delà des 651 m possibles pour un quad de 920 m d'arête). Les scatters de ce quad avaient donc été générés sans notre masque. Rejoué au même endroit, le résultat était parfait. **Piste** : un quad ne s'enregistre qu'à sa construction (`isBuilt` n'est remis à `false` que dans `Awake()`), donc tout quad déjà bâti au moment de l'injection est perdu pour la passe. À surveiller si le cas se reproduit.
 
-### ⚠️ EN COURS — ombres fantômes après surlignage + rechargement (cause INCONNUE)
+### ✅ RÉSOLU le 2026-08-27 — ombres fantômes du surlignage : DEUX bugs, pas un
 
-**Ouvert le 2026-08-25, non résolu.** Ne pas repartir de zéro : voici ce qui est établi et ce qui est déjà écarté.
+Ouvert le 2026-08-25, fermé le 2026-08-27. Le dossier a longtemps piétiné parce qu'on cherchait **une** cause : il y en avait deux, indépendantes, dont une seule produisait le symptôme qui se voyait.
 
-#### Symptôme
+#### Cause 1 (le symptôme) — un shader de KSP produit l'artefact, les autres non
 
-Des formes sombres restent au sol, à l'emplacement de rochers **bien réels**, décalées de leur objet — on les fait coïncider en bougeant la caméra.
+Dessiner l'overlay avec **`KSP/Alpha/Unlit Transparent`** laisse des taches noires sur les rochers, qui survivent dans les frames suivantes en silhouettes **figées en espace écran**. Les quatre autres candidats de `ShaderCandidates`, essayés au même endroit dans la même minute, n'en montrent aucune.
 
-#### Reproduction (stricte)
+C'est un fait de mesure, pas une théorie : le mécanisme interne du shader n'est pas connu (il n'expose pas `_ZWrite`, donc rien ne permet de vérifier l'hypothèse de l'écriture de profondeur depuis le C#). **Correctif : il est retiré de la liste, et le commentaire de `ShaderCandidates` interdit de l'y remettre.**
 
-1. activer le surlignage (entrée PAW) ;
-2. avoir **effectivement** des rochers surlignés à l'écran ;
-3. recharger la partie ;
-4. les ombres apparaissent, **sur exactement les rochers qui avaient été dessinés**.
+Deux leçons à garder :
 
-Aucun nettoyage requis : ça se produit sur un terrain vierge, scénario sans la moindre action.
+- **`Particles/Alpha Blended` n'existe pas dans un KSP 1.12 stock.** `Shader.Find` rend `null` et on descend d'un cran **en silence** — pendant le diagnostic, demander ce candidat donnait en réalité `Legacy Shaders/Transparent/Diffuse`. D'où la ligne de log qui nomme le shader **réellement retenu** : sans elle, une bisection sur la liste est fausse.
+- **Aucun de ces shaders n'expose `_ZWrite`.** Un `SetInt("_ZWrite", 0)` sur un shader qui code sa profondeur en dur ne fait rien, sans erreur. Ne pas croire protéger quoi que ce soit avec.
 
-#### Établi par bisection en jeu
+#### Cause 2 (le vrai bug de fond) — inflater un maillage de grappe le DÉPLACE
 
-| Essai | Ombres ? |
-|---|---|
-| Surlignage **éteint** avant le rechargement | non |
-| Surlignage allumé mais rover en zone vide — **aucun rocher dessiné** | non |
-| Surlignage allumé **avec des rochers dessinés**, puis rechargement | **oui** |
+L'overlay était dessiné à l'échelle ×1,03, pour se poser *autour* du rocher plutôt que de se battre avec lui dans le z-buffer. Le réflexe est bon sur un caillou, faux sur une grappe :
 
-⇒ ce sont **nos appels `Graphics.DrawMesh`**, et uniquement ceux réellement émis. Et elles n'apparaissent qu'**après** le rechargement.
+> Une mise à l'échelle s'applique **autour du pivot du maillage**. Les grosses familles sont des grappes (`clusterhuge`) : un seul maillage dont le pivot est l'ancre, avec des blocs étalés sur 15 à 25 m autour. Le décalage vaut donc **`(facteur − 1) × distance au pivot`** — nul au centre, **60 cm à 20 m** pour 1,03.
 
-Autres faits : éteindre le surlignage ne les efface pas (à reconfirmer, cf. plus bas) ; un second rechargement les efface ; laisser KSP en arrière-plan les efface aussi.
+Vérifié en jeu en faisant varier le facteur à chaud : l'écart est **radial** (chaque bloc poussé dans sa propre direction, en s'éloignant de l'ancre) et **croissant avec la distance au centre**. C'est la signature qui distingue ce bug de tout décalage global — une matrice périmée, une origine flottante ou un décalage de caméra translateraient **tout le voile du même vecteur**.
 
-#### Écarté — ne pas refaire
+**⚠️ Le piège vaut au-delà du surlignage** : toute manipulation d'un maillage de scatter Parallax doit le **translater**, jamais le redimensionner, tant qu'on raisonne sur la position d'un bloc particulier.
 
-| Hypothèse | Testée par | Verdict |
-|---|---|---|
-| Ce sont les ombres de Parallax (ses scatters sont dessinés en `ShadowCastingMode.On`) | essai « zone vide » | **faux** — sans dessin de notre part, rien |
-| On dessine pendant la reconstruction de la scène (`Active` est `static`) | garde-fou `LoadedSceneIsFlight && FlightGlobals.ready` | **sans effet** |
-| `camera: null` diffuse le dessin à toutes les caméras | passage à `Camera.main` | **sans effet** |
-| Notre `Material` est détruit au changement de scène, laissant des entrées de rendu orphelines | `static` + `HideAndDontSave`, `OnDestroy` supprimé | **sans effet** |
+#### Le correctif retenu pour le z-fighting
 
-Les trois correctifs sont **conservés** — chacun se justifie indépendamment — mais aucun n'est la cause.
+Supprimer l'inflation ne suffit pas : à la position exacte du rocher, le voile **clignote**. Parallax construit ses matrices d'instance sur le **GPU**, nous sur le **CPU** — les profondeurs coïncident au bruit flottant près, pas exactement.
 
-#### Pistes pour la reprise
+D'où une **translation vers la caméra**, proportionnelle à la distance (`DepthBiasPerMetre = 0,002`, plancher 2 cm) : elle déplace la grappe **en bloc** sans toucher à sa forme, et reste constante à l'écran alors que la précision du z-buffer, elle, se dégrade avec la distance. Valeur calibrée au raisonnement, pas à la mesure : monter si du clignotement revient au loin, baisser si le voile flotte devant les rochers en vue rasante.
 
-1. **Reconfirmer que l'extinction du surlignage ne les efface pas.** Toute l'analyse repose là-dessus et ça n'a pas été revérifié depuis plusieurs itérations. Si elles disparaissent, ce sont nos maillages rendus en sombre, et il faut chercher du côté du matériau **actif** (shader retenu, `renderQueue = 3100`, `_MainTex`) et non de son cycle de vie.
-2. **Dessiner avec un matériau qu'on ne crée ni ne détruit** — celui de Parallax (`scatter.renderer.instancedMaterialLOD0`). Les rochers ne seront plus rouges, mais si l'artefact disparaît c'est notre matériau, s'il persiste c'est l'appel de dessin lui-même.
-3. **Varier un paramètre à la fois** : `receiveShadows`, le layer (15), le `renderQueue`, l'inflation ×1,03, et le maillage (LOD0 de Parallax vs un cube maison). Le maillage maison est intéressant : on partage actuellement les `Mesh` de Parallax entre deux chemins de rendu.
+#### Ce que la bisection initiale avait raté, et pourquoi
 
-#### Contournement en attendant
+Trois hypothèses avaient été testées et écartées (garde `LoadedSceneIsFlight`, `camera: null` → `Camera.main`, matériau `static` + `HideAndDontSave`). Les trois correctifs sont **conservés** — chacun se justifie indépendamment — mais aucun n'était la cause, et le temps perdu vient de deux erreurs de méthode :
 
-Un rechargement ou une mise en arrière-plan les efface. Pour rendre le bug inatteignable, forcer `ScatterHighlighter.Active = false` au démarrage de la scène (le joueur rallume après le rechargement) — **contournement, pas correctif**.
+- **Un essai de contrôle biaisé.** « Surlignage allumé mais rover en zone vide → pas d'ombres » avait servi à conclure que nos dessins étaient en cause. Sans rocher, il n'y a **rien** qui puisse produire un artefact : l'essai ne sépare pas « c'est notre dessin » de « il faut des rochers pour voir quoi que ce soit ». Le bon contrôle est **le même endroit, surlignage éteint**.
+- **Le rechargement pris pour une condition.** Il n'en est pas une : **bouger la caméra suffit**. La repro coûtait 2 minutes au lieu de 2 secondes, ce qui a découragé toute bisection large. Chercher d'abord la repro la moins chère, avant de commencer à tester des hypothèses.
+
+Ce qui a débloqué le dossier, ce sont deux observations précises du symptôme plutôt que des essais de correctif : **« c'est collé à l'écran »** (donc ni géométrie mal placée ni ombre, qui resteraient ancrées au sol) et **« le voile rouge est décalé du rocher »** (donc notre transformation, pas le pipeline). Et l'outillage qui les a exploitées : des **interrupteurs en vol** (shader, facteur d'inflation) qui ramènent un essai de 5 minutes de rebuild à une touche.
 
 ## 6. Ce qui reste à faire
 
@@ -504,7 +494,7 @@ Le quota est donc un **garde-fou de performance déguisé en gameplay**, et c'es
 ⚠️ **Attention au double comptage** : deux quads voisins ont des grilles non alignées (§2, « La grille est propre à chaque quad »), donc une passe à cheval fait compter la même bande dans plusieurs masques. Le quota doit se décompter sur la **surface du geste** (longueur × largeur / 25), pas sur la somme des cases effacées par quad — sinon la même passe coûte deux à quatre fois plus cher selon l'endroit où on se trouve.
 
 ### Le reste
-- **Viser à l'aveugle.** Le highlight ne montre que les rochers *chargés* : sur une passe de 200 m, le bout de la bande n'est pas prévisualisé. Un tracé de la bande au sol le règlerait, mais touche au bug d'ombres fantômes ci-dessus — reporté volontairement.
+- **Viser à l'aveugle.** Le highlight ne montre que les rochers *chargés* : sur une passe de 200 m, le bout de la bande n'est pas prévisualisé. Un tracé de la bande au sol le règlerait — **débloqué** depuis la fermeture des ombres fantômes (§5), qui était la raison du report. Reprendre le matériau et le biais de profondeur de `ScatterHighlighter`, pas un shader choisi au hasard.
 - **Retirer les outils de test** (`Src/diagnostics/`) : `QuadOverlay`, `BulldozerScatterDiagnostic` et `BandDiagnostic`. À garder tant que la lame n'est pas faite — `BandDiagnostic` a payé son écot le 2026-08-27 (il a prouvé la visée et chiffré le bug du cap), et c'est le seul moyen de distinguer « le masque est ailleurs » de « la lame passe entre les cailloux ».
 - **Détail terrain : exigence caduque.** On voulait imposer le preset maximum, d'abord pour la finesse (elle vient de la texture, pas du maillage : sans objet), puis parce que la taille des quads en dépend. Les deux raisons sont tombées : l'arête est **mesurée en vol** et voyage dans l'action, et un changement de preset est détecté par la garde `maxLevel` (l'action est alors ignorée avec un avertissement, plutôt qu'appliquée de travers). Reste à décider ce qu'on fait de ces actions orphelines — les recalculer à la première occasion en vol serait plus élégant que de les abandonner.
 - **Bords de zone** : coupure franche ou dégradé dans le masque (le sampler est bilinéaire, un masque adouci suffirait). Sans objet à 5 m de large — une seule case, aucune place pour un dégradé — et de peu d'intérêt à 20 m : le bord perçu est celui des scatters survivants, déjà irrégulier à l'échelle de leur espacement.

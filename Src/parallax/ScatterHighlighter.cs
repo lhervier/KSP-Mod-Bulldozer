@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using Unity.Collections;
 using UnityEngine;
 using UnityEngine.Rendering;
@@ -46,14 +46,22 @@ namespace com.github.lhervier.ksp.bulldozermod.parallax
         public static bool Active;
 
         // Tried in order, first hit wins. Which shaders a KSP install actually keeps is not guaranteed, so
-        // the resolved name is logged: it is the first thing to check if nothing shows up.
+        // the resolved name is logged: it is the first thing to check if nothing shows up. On a stock 1.12
+        // install "Particles/Alpha Blended" is NOT there and falls through to the legacy one.
+        //
+        // "KSP/Alpha/Unlit Transparent" is DELIBERATELY ABSENT and must not be put back: drawing the overlay
+        // with it leaves black patches on the rocks that survive into the following frames as silhouettes
+        // frozen in screen space. Every other candidate here was tried in flight at the same spot, none
+        // shows it. See CLAUDE.md.
+        //
+        // Only the first two are translucent, which is what the overlay wants; the last three hide the rock
+        // under a flat red and are a last resort - a coarse overlay still beats none.
         private static readonly string[] ShaderCandidates =
         {
-            "KSP/Alpha/Unlit Transparent",
+            "Legacy Shaders/Transparent/Diffuse",
+            "Particles/Alpha Blended",
             "KSP/Unlit",
             "Unlit/Color",
-            "Particles/Alpha Blended",
-            "Legacy Shaders/Transparent/Diffuse",
             "Diffuse"
         };
 
@@ -61,13 +69,21 @@ namespace com.github.lhervier.ksp.bulldozermod.parallax
         // one is drawn by the flight camera and is where the terrain lives.
         private const int DrawLayer = 15;
 
-        // Slightly inflated so the overlay sits just outside the rock rather than fighting it in the z-buffer.
-        private const float Inflate = 1.03f;
+        // How far the overlay is pulled towards the camera, per metre of distance to it, to keep it clear
+        // of the rock's own depth. Proportional on purpose: depth precision degrades with distance, so a
+        // fixed offset that works up close stops working further out, while this one stays constant on
+        // screen. The floor covers instances almost against the lens.
+        //
+        // A camera-ward TRANSLATION, never a scale-up: see the DrawMesh call for why inflating is wrong on
+        // a cluster mesh.
+        private const float DepthBiasPerMetre = 0.002f;
+        private const float MinDepthBias = 0.02f;
 
         private static readonly Color HighlightColor = new Color(1f, 0.15f, 0.1f, 0.6f);
 
         // Static, and never destroyed: see HighlightMaterial().
         private static Material _material;
+
 
         // The activation summary is logged on the first frame that actually finds something: on the very
         // first frame Parallax has usually not filled its lists yet and everything reads zero.
@@ -260,9 +276,24 @@ namespace com.github.lhervier.ksp.bulldozermod.parallax
                     // Shadows OFF, and this is not cosmetic: the short DrawMesh overload defaults to
                     // castShadows = true, so the overlay threw its own shadow onto the ground — thin black
                     // streaks next to each rock, sliding around in 3D as the sun and camera moved.
+                    // Drawn at the rock's OWN scale, nudged towards the camera. Puffing the overlay up to
+                    // sit outside the rock rather than fight it in the z-buffer is the obvious move, and it
+                    // is wrong here: a scale applies about the MESH PIVOT, and the big families are clusters
+                    // - one mesh whose pivot is the anchor, boulders spread 15-25 m around it. A factor of
+                    // 1.03 pushed every boulder RADIALLY away from the anchor, 60 cm at 20 m: the veil kept
+                    // the shape of the rock and landed beside it (measured in flight, growing with the
+                    // factor). A translation moves the whole cluster as one and leaves its shape alone.
+                    //
+                    // The nudge is needed: at exactly the rock's position the overlay z-fights it and
+                    // flickers, because Parallax builds its instance matrices on the GPU and ours on the
+                    // CPU - the depths agree to within float noise, not exactly.
+                    Vector3 toCamera = camera.transform.position - world;
+                    float bias = Math.Max(MinDepthBias, DepthBiasPerMetre * toCamera.magnitude);
+
                     Graphics.DrawMesh(
                         mesh,
-                        Matrix4x4.TRS(world, rotation, Vector3.Scale(quadScale, position.localScale) * Inflate),
+                        Matrix4x4.TRS(world + toCamera.normalized * bias, rotation,
+                                      Vector3.Scale(quadScale, position.localScale)),
                         material, DrawLayer, camera, 0, null, ShadowCastingMode.Off, false);
 
                     shown++;
@@ -404,7 +435,11 @@ namespace com.github.lhervier.ksp.bulldozermod.parallax
                 }
                 _material.renderQueue = 3100;
 
-                LOGGER.LogInfo($"Highlight material using shader '{ShaderCandidates[i]}'");
+                // Logged because the choice MATTERS beyond looks: one KSP shader turns this overlay into a
+                // screen-space artefact (see ShaderCandidates). Shader.Find returning null moves us down the
+                // list silently, so this line is the only way to know what is actually drawing.
+                LOGGER.LogInfo($"Highlight material using shader '{ShaderCandidates[i]}' "
+                               + $"(shader queue {shader.renderQueue})");
                 return _material;
             }
 
