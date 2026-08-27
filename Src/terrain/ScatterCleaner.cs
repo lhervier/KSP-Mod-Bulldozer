@@ -7,10 +7,10 @@ using com.github.lhervier.ksp.bulldozermod.persistence;
 namespace com.github.lhervier.ksp.bulldozermod.terrain
 {
     /// <summary>
-    /// Applies the save's cleaning actions: one exclusion decal per impacted leaf quad, each carrying a mask
-    /// where every disk touching that quad has been drawn.
+    /// Applies the save's blade passes: one exclusion decal per impacted leaf quad, each carrying a mask
+    /// where every strip touching that quad has been drawn.
     ///
-    /// Merging is a lookup, not an algorithm: two actions touching the same quad share its decal and simply
+    /// Merging is a lookup, not an algorithm: two passes touching the same quad share its decal and simply
     /// draw into the same mask.
     ///
     /// Must run from the scenario's OnLoad, i.e. during the loading screen while the vessel is still PACKED:
@@ -37,10 +37,24 @@ namespace com.github.lhervier.ksp.bulldozermod.terrain
         // The decal must cover its whole quad, whose furthest point is one half-diagonal away; the margin
         // keeps the quad inside the shader's inscribed disk rather than exactly on its edge.
         //
-        // It does NOT try to also contain the disk: on a small body a disk near a quad corner reaches well
-        // past this, and DrawDisk clamps it. That is correct — the clipped part lies outside the quad, and
-        // the neighbouring quad's own mask carries it.
+        // It does NOT try to also contain the strip: a pass is longer than a quad, so DrawBand clamps it.
+        // That is correct — the clipped part lies outside the quad, and the neighbouring quad's own mask
+        // carries it.
         public const double FootprintMargin = 1.1;
+
+        /// <summary>
+        /// The strip as it will land in the mask a given quad receives: same footprint, same cell size, same
+        /// orientation as <see cref="InjectActions"/> builds. Anything that wants to predict a pass — the
+        /// quad search, the highlight — has to go through here, or it predicts a grid that will not exist.
+        /// </summary>
+        public static BandRaster RasterFor(CelestialBody body, Vector3d quadCenter, double halfDiagonal,
+                                           SurfaceBand band)
+        {
+            double footprint = halfDiagonal * FootprintMargin;
+            return BandRaster.Project(
+                BulldozerScatterDecal.RotationFor(quadCenter, ParallaxInterop.DecalAngle),
+                body.Radius, footprint, ScatterMask.SizeFor(footprint), band);
+        }
 
         /// <summary>
         /// Purges our decals from every body, rebuilds one decal per impacted quad, and resets the touched
@@ -61,7 +75,7 @@ namespace com.github.lhervier.ksp.bulldozermod.terrain
             // by two different actions, lands on the same decal — that is the whole merge.
             Dictionary<string, BulldozerScatterDecal> decals = new Dictionary<string, BulldozerScatterDecal>();
 
-            int disks = 0;
+            int strokes = 0;
             foreach (BulldozerAction action in actions)
             {
                 CelestialBody body = FlightGlobals.GetBodyByName(action.bodyName);
@@ -78,7 +92,14 @@ namespace com.github.lhervier.ksp.bulldozermod.terrain
                     continue;
                 }
 
-                Vector3d diskDirection = body.GetRelSurfaceNVector(action.lat, action.lon);
+                SurfaceBand band;
+                if (!action.TryGetBand(body, out band))
+                {
+                    LOGGER.LogWarning($"Action on {body.name} carries unusable geometry " +
+                                      $"(length={action.length:F0} m, forward={action.forward}) — skipped");
+                    continue;
+                }
+
                 foreach (BulldozerAction.ImpactedQuad quad in action.quads)
                 {
                     BulldozerScatterDecal decal = GetOrCreateDecal(body, quad, decals);
@@ -86,8 +107,8 @@ namespace com.github.lhervier.ksp.bulldozermod.terrain
                     {
                         continue;
                     }
-                    decal.mask.DrawDisk(decal.rot, body.Radius, diskDirection, action.radius);
-                    disks++;
+                    decal.mask.DrawBand(decal.rot, body.Radius, band);
+                    strokes++;
                 }
                 touched.Add(body);
             }
@@ -104,7 +125,7 @@ namespace com.github.lhervier.ksp.bulldozermod.terrain
                 }
             }
 
-            LOGGER.LogInfo($"Injected {decals.Count} decal(s) carrying {disks} disk(s); " +
+            LOGGER.LogInfo($"Injected {decals.Count} decal(s) carrying {strokes} stroke(s); " +
                            $"reset {touched.Count} body(ies)");
         }
 
@@ -112,12 +133,7 @@ namespace com.github.lhervier.ksp.bulldozermod.terrain
         //
         // The first action to reach a quad is the one that sizes its decal, and later ones take it as it is.
         // That is safe because the half-diagonal describes the QUAD, not the action: every action touching
-        // this quad measured the same geometry, so they all ask for the same footprint. (Actions written
-        // before the measurement became per-quad carry an action-wide maximum instead — larger, never
-        // smaller, so an over-sized footprint is the worst that can happen. It costs mask memory and
-        // nothing else: the mask keeps a constant meters-per-pixel, DrawDisk projects through the same
-        // radius the shader reads back, and quad ownership is decided by center distance in
-        // BulldozerScatterDecal.OnQuadPreBuild, never by the radius.)
+        // this quad measured the same geometry, so they all ask for the same footprint.
         private static BulldozerScatterDecal GetOrCreateDecal(CelestialBody body,
                                                               BulldozerAction.ImpactedQuad quad,
                                                               Dictionary<string, BulldozerScatterDecal> decals)

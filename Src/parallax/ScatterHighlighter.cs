@@ -3,14 +3,22 @@ using Unity.Collections;
 using UnityEngine;
 using UnityEngine.Rendering;
 using Parallax;
+using Parallax.PQS_Mods;
 using com.github.lhervier.ksp.shared;
 using com.github.lhervier.ksp.bulldozermod.terrain;
 
 namespace com.github.lhervier.ksp.bulldozermod.parallax
 {
     /// <summary>
-    /// Draws, every frame, an overlay over the collideable scatters that a clean would remove right now.
-    /// Toggled from the PAW; nothing is drawn while it is off.
+    /// Draws, every frame, an overlay over the collideable scatters that a blade pass would remove right
+    /// now. Toggled from the PAW; nothing is drawn while it is off.
+    ///
+    /// The verdict is not a geometric "is the rock inside the rectangle": it is the mask itself. For every
+    /// quad in reach the overlay builds the raster the injection would build (ScatterCleaner.RasterFor) and
+    /// asks it the same question the compute shader will ask - bilinear sample, blocked under 0.5. At the
+    /// narrowest width the strip sits at the resolution limit of the mask, so a geometric answer would be
+    /// wrong exactly where the player needs it right: it would promise a clean corridor where the cells give
+    /// a wider one, a stepped one at a quad seam, or none at all on a quad another mod already owns.
     ///
     /// Only collideable scatters can be shown, and that is the useful set anyway: they are the only ones
     /// Parallax describes instance by instance, and the only ones a rover can hit. The small families exist
@@ -18,9 +26,9 @@ namespace com.github.lhervier.ksp.bulldozermod.parallax
     ///
     /// The unit shown is the scatter INSTANCE, which for the big families is a whole CLUSTER of boulders.
     /// That is deliberate: it is exactly the unit the block map removes or keeps. A cluster anchored outside
-    /// the disk keeps every one of its boulders, including the ones reaching inside it — highlighting per
-    /// instance turns that rule into something visible rather than into a surprise (see the cluster PIEGE in
-    /// the README).
+    /// the strip keeps every one of its boulders, including the ones reaching into it — which a narrow
+    /// pass runs into constantly, and what this overlay is there to show rather than let the player discover
+    /// it after a reload (see the cluster PIEGE in the README).
     ///
     /// Note the fully qualified <c>Parallax.CollisionManager</c> below: KSP ships a <c>CollisionManager</c>
     /// of its own in the global namespace, so the bare name silently resolves to the wrong type — and the
@@ -69,6 +77,10 @@ namespace com.github.lhervier.ksp.bulldozermod.parallax
         private int _lastTotal = -1;
         private int[] _loaded;
         private int[] _shown;
+
+        // Reused every frame: measuring a quad then allocates nothing, which matters in a loop that walks
+        // every loaded quad.
+        private readonly Vector3d[] _corners = new Vector3d[4];
 
         private void Update()
         {
@@ -134,15 +146,15 @@ namespace com.github.lhervier.ksp.bulldozermod.parallax
 
             CelestialBody body = vessel.mainBody;
 
-            // Both directions are taken in WORLD space at the same instant, which sidesteps the fixed vs
-            // rotating frame trap entirely: no lat/lon round-trip, nothing to keep in sync. It describes the
-            // same disk the click paints, since Vessel.latitude/longitude derive from this very position.
-            Vector3d bodyCenter = body.position;
+            // The strip a click would apply right now, built by the very code the click uses.
+            SurfaceBand band;
+            if (!BulldozerCleanModule.TryBuildBand(vessel, BulldozerCleanModule.SelectedLength,
+                                                  BulldozerCleanModule.SelectedWidth, out band))
+            {
+                return;
+            }
+
             Vector3d vesselWorld = vessel.GetWorldPos3D();
-            Vector3d centerDir = (vesselWorld - bodyCenter).normalized;
-            // Compared as a cosine rather than an angle: this runs on every collideable instance of every
-            // loaded quad, every frame, and an Acos per instance is the one thing worth not paying for.
-            double minCos = Math.Cos(BulldozerCleanModule.ClearRadius / body.Radius);
 
             EnsureCounters();
 
@@ -165,11 +177,38 @@ namespace com.github.lhervier.ksp.bulldozermod.parallax
 
                 // Reject whole quads before touching their instances. Without this the loop walks every
                 // collideable instance Parallax has loaded — measured at 59 000 on the Mun for the 8 that
-                // were actually in range. A quad matters only if it comes within the disk plus its own
-                // width, which around the vessel leaves four quads at most.
-                double quadReach = BulldozerCleanModule.ClearRadius + Math.Sqrt(quadData.sqrQuadWidth);
+                // were actually in range. A quad matters only if it comes within reach of the strip plus its
+                // own width; the strip never runs further than its length from the vessel.
+                double quadReach = band.length + band.width + Math.Sqrt(quadData.sqrQuadWidth);
                 if ((((Vector3d)quadData.quad.gameObject.transform.position) - vesselWorld).sqrMagnitude
                     > quadReach * quadReach)
+                {
+                    continue;
+                }
+
+                // A quad another mod's decal already owns can never take ours, so nothing on it would go.
+                // Silently, which is exactly why it has to show here (near the KSC, ParallaxMaskKSC).
+                PQSMod_MapDecalVertexRemoveScatter quadOwner;
+                if (PQSMod_MapDecalVertexRemoveScatter.maskedScattersPerQuad.TryGetValue(
+                        quadData.quad, out quadOwner)
+                    && !(quadOwner is BulldozerScatterDecal))
+                {
+                    continue;
+                }
+
+                // The mask this quad WOULD get, cell grid and all. Rebuilt per entry rather than memoised per
+                // quad: Parallax keeps one entry per (quad, scatter family), so this repeats a handful of
+                // times per quad — four Acos and a bounded cell scan each, against the 59 000 per-instance
+                // tests the rejection above is there to avoid. Worth revisiting only if it shows up in a
+                // profile on a small body, where a long pass crosses many quads.
+                double halfDiagonal;
+                if (!QuadLocator.TryGetHalfDiagonal(body, quadData.quad, _corners, out halfDiagonal))
+                {
+                    continue;
+                }
+                BandRaster raster = ScatterCleaner.RasterFor(
+                    body, quadData.quad.positionPlanetRelative, halfDiagonal, band);
+                if (!raster.ClearsAnyCell())
                 {
                     continue;
                 }
@@ -206,8 +245,10 @@ namespace com.github.lhervier.ksp.bulldozermod.parallax
                     total++;
                     _loaded[slot]++;
 
-                    Vector3d rockDir = ((Vector3d)world - bodyCenter).normalized;
-                    if (Vector3d.Dot(centerDir, rockDir) < minCos)
+                    // The instance's own direction in body frame - the very quantity the compute shader
+                    // projects into the block map (its avgDirection), so the answer below is the shader's.
+                    Vector3d rockDir = body.GetRelSurfacePosition(world).normalized;
+                    if (!raster.Blocks(rockDir))
                     {
                         continue;
                     }
@@ -237,7 +278,7 @@ namespace com.github.lhervier.ksp.bulldozermod.parallax
             else if (shown != _lastShown || total != _lastTotal)
             {
                 // Only on change: silent while parked, one line per step while driving. This is what tells
-                // "nothing is within the radius" (total > 0) apart from "Parallax has loaded nothing around
+                // "nothing is under the strip" (total > 0) apart from "Parallax has loaded nothing around
                 // here at all" (total == 0) — the two look identical on screen.
                 LOGGER.LogInfo($"Highlighting {shown} of {total} collideable instance(s)");
             }
@@ -251,7 +292,8 @@ namespace com.github.lhervier.ksp.bulldozermod.parallax
         private void LogSummary(CelestialBody body, int shown, int total)
         {
             LOGGER.LogInfo($"Highlighting {shown} of {total} collideable instance(s) loaded around the " +
-                           $"vessel, for a {BulldozerCleanModule.ClearRadius:F0} m clean");
+                           $"vessel, for a {BulldozerCleanModule.SelectedLength:F0} x " +
+                           $"{BulldozerCleanModule.SelectedWidth:F0} m pass");
 
             Scatter[] scatters = Parallax.CollisionManager.collideableScatters;
             for (int i = 0; i < _loaded.Length; i++)
@@ -266,7 +308,7 @@ namespace com.github.lhervier.ksp.bulldozermod.parallax
                 LOGGER.LogInfo($"    {name}: {_shown[i]} highlighted / {_loaded[i]} loaded");
             }
 
-            // Everything a clean removes, minus what we can draw: the difference is what the player will see
+            // Everything a pass removes, minus what we can draw: the difference is what the player will see
             // vanish without ever having been highlighted.
             foreach (string name in ParallaxInterop.GetScatterNames(body.name))
             {
@@ -280,7 +322,7 @@ namespace com.github.lhervier.ksp.bulldozermod.parallax
                 }
                 if (!collideable)
                 {
-                    LOGGER.LogInfo($"    {name}: not collideable — removed by a clean, never highlighted");
+                    LOGGER.LogInfo($"    {name}: not collideable — removed by a pass, never highlighted");
                 }
             }
         }

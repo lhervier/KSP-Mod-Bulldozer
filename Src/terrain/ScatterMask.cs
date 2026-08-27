@@ -16,6 +16,9 @@ namespace com.github.lhervier.ksp.bulldozermod.terrain
     /// (see "Le repère du masque" in the README). It is NOT aligned with the quad, and it is not stretched
     /// onto it either: both axes use the same scale, so a pixel is always a SQUARE on the ground whatever
     /// the quad's own shape.
+    ///
+    /// What a stroke actually covers is decided by <see cref="BandRaster"/>, not here: the same rules have
+    /// to serve the highlight, which announces the outcome before the mask exists.
     /// </summary>
     public class ScatterMask
     {
@@ -27,7 +30,7 @@ namespace com.github.lhervier.ksp.bulldozermod.terrain
         ///
         /// A fixed texture size cannot: the footprint follows the quad, which ranges from ~80 m on Gilly to
         /// ~4.3 km on Eve, so 2048 px meant 4 cm/pixel on Gilly (8 MB for nothing) and 2 m/pixel on Eve
-        /// (where a minimum-radius disk covered 5 pixels). See "Taille du masque" in the README.
+        /// (where the smallest stroke worth drawing covered 5 pixels). See "Taille du masque" in the README.
         /// </summary>
         public const double MetersPerPixel = 5.0;
 
@@ -51,7 +54,7 @@ namespace com.github.lhervier.ksp.bulldozermod.terrain
             get { return _size; }
         }
 
-        /// <summary>The texture to hand to the decal. Kept in sync by <see cref="DrawDisk"/>.</summary>
+        /// <summary>The texture to hand to the decal. Kept in sync by <see cref="DrawBand"/>.</summary>
         public Texture2D Texture
         {
             get { return _texture; }
@@ -90,8 +93,10 @@ namespace com.github.lhervier.ksp.bulldozermod.terrain
             _texture.name = "BulldozerScatterMask";
 
             // Bilinear + clamp mirrors how the compute shader samples it (linearClampSampler). Bilinear is
-            // load-bearing at this resolution: with the shader's 0.5 threshold it reconstructs the disk edge
-            // at half a pixel, so a disk a handful of cells wide still reads as round rather than stepped.
+            // load-bearing at this resolution: with the shader's 0.5 threshold, the cleared area comes out
+            // as the union of the cleared cells' squares rather than as their centers. That is what makes a
+            // strip one cell wide clear a full cell width -- and what BandRaster.Blocks reproduces to
+            // predict it.
             _texture.filterMode = FilterMode.Bilinear;
             _texture.wrapMode = TextureWrapMode.Clamp;
 
@@ -104,56 +109,47 @@ namespace com.github.lhervier.ksp.bulldozermod.terrain
         }
 
         /// <summary>
-        /// Clears a disk of <paramref name="radius"/> meters centered on the given surface direction.
+        /// Clears the strip one blade pass covers, as far as it reaches into this mask.
         ///
         /// <paramref name="rot"/> must be the decal's own rotation — the very one the shader uses. It
         /// already encodes where the decal sits, so no separate center is needed.
+        ///
+        /// A pass usually crosses several quads: the part of the strip that falls outside this mask is
+        /// outside its quad too, and the neighbouring quad's own mask carries it.
         /// </summary>
-        public void DrawDisk(Quaternion rot, double bodyRadius, Vector3d diskDirection, double radius)
+        public void DrawBand(Quaternion rot, double bodyRadius, SurfaceBand band)
         {
-            // Same projection as the shader: rotate into the decal frame, then map [-R, +R] onto [0, 1].
-            // Both axes divide by the same DecalRadius and spread over the same _size, which is what makes
-            // a pixel square and lets the disk be rasterised with a single scalar radius below.
-            Vector3 rotated = rot * (Vector3)diskDirection;
-            double u = (rotated.x * bodyRadius / DecalRadius + 1.0) * 0.5;
-            double v = (rotated.z * bodyRadius / DecalRadius + 1.0) * 0.5;
+            BandRaster raster = BandRaster.Project(rot, bodyRadius, DecalRadius, _size, band);
 
-            // Over a quad's width the gnomonic distortion is negligible, so the disk stays a disk in UV
-            // space and only its center needs the full projection.
-            double centerX = u * _size;
-            double centerY = v * _size;
-            double radiusPx = radius / (2.0 * DecalRadius) * _size;
-            double radiusPxSq = radiusPx * radiusPx;
-
-            // Clamping is expected near a quad corner on a small body: the part of the disk that falls
-            // outside the mask is outside the quad too, and the neighbouring quad's own mask carries it.
-            int minX = Math.Max(0, (int)Math.Floor(centerX - radiusPx));
-            int maxX = Math.Min(_size - 1, (int)Math.Ceiling(centerX + radiusPx));
-            int minY = Math.Max(0, (int)Math.Floor(centerY - radiusPx));
-            int maxY = Math.Min(_size - 1, (int)Math.Ceiling(centerY + radiusPx));
+            int minX, minY, maxX, maxY;
+            if (!raster.TryGetCellBounds(out minX, out minY, out maxX, out maxY))
+            {
+                LOGGER.LogInfo($"band of {band.length:F0} m misses this {_size}px mask entirely");
+                return;
+            }
 
             NativeArray<byte> pixels = Pixels;
+            int cleared = 0;
             for (int y = minY; y <= maxY; y++)
             {
-                double dy = (y + 0.5) - centerY;
                 int row = y * _size;
                 for (int x = minX; x <= maxX; x++)
                 {
-                    double dx = (x + 0.5) - centerX;
-                    if (dx * dx + dy * dy <= radiusPxSq)
+                    if (raster.CellCleared(x, y))
                     {
                         pixels[row + x] = Clear;
+                        cleared++;
                     }
                 }
             }
 
             Apply();
 
-            // u/v and the pixel center are what to check first if a cleared area lands somewhere unexpected:
-            // a wrong vertical convention would mirror it around the mask center.
-            LOGGER.LogInfo($"disk r={radius:F0} m -> uv=({u:F4},{v:F4}) px=({centerX:F0},{centerY:F0}) " +
-                           $"rpx={radiusPx:F1} in a {_size}px mask of {2.0 * DecalRadius:F0} m " +
-                           $"({2.0 * DecalRadius / _size:F2} m/px)");
+            // The pixel box is what to check first if a cleared area lands somewhere unexpected: a wrong
+            // vertical convention would mirror it around the mask center.
+            LOGGER.LogInfo($"band {band.length:F0} x {band.width:F0} m -> {cleared} cell(s) in " +
+                           $"px [{minX}..{maxX}]x[{minY}..{maxY}] of a {_size}px mask of " +
+                           $"{2.0 * DecalRadius:F0} m ({2.0 * DecalRadius / _size:F2} m/px)");
         }
 
         /// <summary>Frees the GPU/CPU texture. The mask must not be used afterwards.</summary>
@@ -179,7 +175,7 @@ namespace com.github.lhervier.ksp.bulldozermod.terrain
         }
 
         // Pushes the CPU pixels written above to the GPU. No mipmaps, and the texture stays readable (it
-        // must: Pixels needs it, and later DrawDisk calls complete the same mask).
+        // must: Pixels needs it, and later DrawBand calls complete the same mask).
         private void Apply()
         {
             _texture.Apply(false, false);

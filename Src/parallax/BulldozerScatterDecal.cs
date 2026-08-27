@@ -44,6 +44,19 @@ namespace com.github.lhervier.ksp.bulldozermod.parallax
 
         private double _centerTolerance;
 
+        /// <summary>
+        /// The mask rotation a decal centered on that direction ends up with — the very quaternion the shader
+        /// applies to a candidate position.
+        ///
+        /// Public and static because the highlight has to reproduce the mask grid of a quad that carries no
+        /// decal yet. Two expressions for one grid would make the preview lie.
+        /// </summary>
+        public static Quaternion RotationFor(Vector3d centerDirection, float angle)
+        {
+            return Quaternion.AngleAxis(angle, Vector3.up)
+                   * Quaternion.FromToRotation((Vector3)centerDirection.normalized, Vector3.up);
+        }
+
         public override void OnSetup()
         {
             base.OnSetup();
@@ -53,8 +66,7 @@ namespace com.github.lhervier.ksp.bulldozermod.parallax
                 normalisedPosition = preciseDirection.normalized;
 
                 // rot is derived from normalisedPosition, so it has to follow (same expression as the base).
-                rot = Quaternion.AngleAxis(angle, Vector3.up)
-                      * Quaternion.FromToRotation((Vector3)normalisedPosition, Vector3.up);
+                rot = RotationFor(normalisedPosition, angle);
             }
 
             _centerTolerance = CenterToleranceMeters / sphere.radius;

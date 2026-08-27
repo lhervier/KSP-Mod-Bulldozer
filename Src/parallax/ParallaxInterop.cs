@@ -49,6 +49,14 @@ namespace com.github.lhervier.ksp.bulldozermod.parallax
         }
 
         /// <summary>
+        /// Extra rotation given to every decal we create. Zero: the mask is ours to draw, so there is nothing
+        /// to align it to (Parallax sets 15 degrees on its KSC decal to match a hand-made texture).
+        ///
+        /// Public because predicting the mask grid means reproducing the decal's `rot`, which folds it in.
+        /// </summary>
+        public const float DecalAngle = 0f;
+
+        /// <summary>
         /// Adds an exclusion decal to <paramref name="host"/>, centered on <paramref name="position"/>. The
         /// caller owns the GameObject, must parent it under the body's PQS BEFORE the sphere builds, and
         /// must set the mask (<c>colorMap</c>) before the terrain is built.
@@ -67,7 +75,7 @@ namespace com.github.lhervier.ksp.bulldozermod.parallax
 
             decal.position = (Vector3)position;
             decal.radius = radius;
-            decal.angle = 0f;
+            decal.angle = DecalAngle;
             decal.blockedScatters = blockedScatters;
             decal.order = order;
             decal.modEnabled = true;
