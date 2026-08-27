@@ -20,7 +20,7 @@ namespace com.github.lhervier.ksp.bulldozermod.parallax
     ///    2.8 km cone (inclusionAngle is 4x the radius) and lock out its neighbours' decals.
     /// 2. Clamping the dot product before Acos. The decal sits EXACTLY on its quad's center, so the angle is
     ///    zero and `position` being a Vector3 (float) makes the dot come out just above 1 — Acos would
-    ///    return NaN and the quad would never attach. See the README, "PIEGE 1".
+    ///    return NaN and the quad would never attach. See CLAUDE.md, "PIEGE 1".
     ///
     /// The quad is identified by the position of its center, never by reference: PQ instances are destroyed
     /// and recreated constantly, only their center persists.

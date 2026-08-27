@@ -28,7 +28,7 @@ namespace com.github.lhervier.ksp.bulldozermod.parallax
     /// That is deliberate: it is exactly the unit the block map removes or keeps. A cluster anchored outside
     /// the strip keeps every one of its boulders, including the ones reaching into it — which a narrow
     /// pass runs into constantly, and what this overlay is there to show rather than let the player discover
-    /// it after a reload (see the cluster PIEGE in the README).
+    /// it after a reload (see the cluster PIEGE in CLAUDE.md).
     ///
     /// Note the fully qualified <c>Parallax.CollisionManager</c> below: KSP ships a <c>CollisionManager</c>
     /// of its own in the global namespace, so the bare name silently resolves to the wrong type — and the
@@ -97,7 +97,7 @@ namespace com.github.lhervier.ksp.bulldozermod.parallax
             // would otherwise keep drawing all through a reload, while quads and their GPU buffers are being
             // torn down and rebuilt — pointless at best.
             //
-            // Was TRIED as a fix for the ghost-shadow bug (see the README) and did NOT fix it. Kept on its
+            // Was TRIED as a fix for the ghost-shadow bug (see CLAUDE.md) and did NOT fix it. Kept on its
             // own merits.
             if (!HighLogic.LoadedSceneIsFlight || !FlightGlobals.ready)
             {
@@ -136,7 +136,7 @@ namespace com.github.lhervier.ksp.bulldozermod.parallax
             // overlay only makes sense in the one being looked at; Parallax names Camera.main explicitly for
             // its own scatters.
             //
-            // Was TRIED as a fix for the ghost-shadow bug (see the README) and did NOT fix it. Kept on its
+            // Was TRIED as a fix for the ghost-shadow bug (see CLAUDE.md) and did NOT fix it. Kept on its
             // own merits.
             Camera camera = Camera.main;
             if (camera == null)
@@ -367,7 +367,7 @@ namespace com.github.lhervier.ksp.bulldozermod.parallax
         /// Resources.UnloadUnusedAssets there, which would otherwise collect it, and rebuilding it per scene
         /// bought nothing.
         ///
-        /// Destroying it per scene was TRIED as a fix for the ghost-shadow bug (see the README) and did NOT
+        /// Destroying it per scene was TRIED as a fix for the ghost-shadow bug (see CLAUDE.md) and did NOT
         /// fix it. Kept on its own merits.
         /// </summary>
         private Material HighlightMaterial()
