@@ -206,13 +206,13 @@ namespace com.github.lhervier.ksp.bulldozermod.diagnostics
             // plane, not in angle) — printing it as if it were the quad's size is how a log reader ends up
             // hunting the wrong distance. Measured on the Mun at maxLevel 9: formula 614 m, real 728 x 754 m
             // here, and 313 x 478 m near a cube corner. It stays only as a labelled reference point.
-            QuadLocator.QuadShape shape;
-            if (ranked.Count > 0 && QuadLocator.TryMeasureShape(body, ranked[0].Key, out shape))
+            QuadMetrics.QuadShape shape;
+            if (ranked.Count > 0 && QuadMetrics.TryMeasureShape(body, ranked[0].Key, out shape))
             {
                 LOGGER.LogInfo($"  nearest quad measured at maxLevel={body.pqsController.maxLevel}: " +
                                $"{shape.sideA:F0} x {shape.sideB:F0} m, half-diagonal " +
                                $"{shape.halfDiagonalMin:F0}..{shape.halfDiagonalMax:F0} m " +
-                               $"(the {QuadLocator.NominalQuadEdge(body.pqsController):F0} m formula " +
+                               $"(the {QuadMetrics.NominalQuadEdge(body.pqsController):F0} m formula " +
                                $"under-estimates — never size anything with it)");
             }
             else

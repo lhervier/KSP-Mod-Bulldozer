@@ -3,6 +3,7 @@ using UnityEngine;
 using Parallax.PQS_Mods;
 using com.github.lhervier.ksp.shared;
 using com.github.lhervier.ksp.bulldozermod.terrain;
+using com.github.lhervier.ksp.bulldozermod.utils;
 
 namespace com.github.lhervier.ksp.bulldozermod.parallax
 {
@@ -65,7 +66,7 @@ namespace com.github.lhervier.ksp.bulldozermod.parallax
             {
                 return;
             }
-            if (QuadLocator.AngleBetween(quad.positionPlanetRelative, normalisedPosition) > _centerTolerance)
+            if (MathUtils.AngleBetween(quad.positionPlanetRelative, normalisedPosition) > _centerTolerance)
             {
                 return;
             }

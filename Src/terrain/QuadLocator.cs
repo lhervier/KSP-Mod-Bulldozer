@@ -4,6 +4,7 @@ using UnityEngine;
 using Parallax;
 using Parallax.PQS_Mods;
 using com.github.lhervier.ksp.shared;
+using com.github.lhervier.ksp.bulldozermod.utils;
 
 namespace com.github.lhervier.ksp.bulldozermod.terrain
 {
@@ -20,44 +21,6 @@ namespace com.github.lhervier.ksp.bulldozermod.terrain
     {
         private static readonly ModLogger LOGGER = new ModLogger("QuadLocator");
 
-        /// <summary>A leaf quad, identified by the direction of its center in BODY FRAME.</summary>
-        public struct QuadRef
-        {
-            /// <summary>
-            /// Unit direction of the quad center, in the same frame as PQ.positionPlanetRelative — which is
-            /// also the frame CelestialBody.GetRelSurfaceNVector produces.
-            ///
-            /// Deliberately NOT stored as lat/lon: converting through GetLatitude/GetLongitude goes via the
-            /// body's ROTATING frame, while GetRelSurfaceNVector rebuilds from the FIXED one. Round-tripping
-            /// through them offsets the decal by the body's current rotation — measured at 52 km on the Mun.
-            /// </summary>
-            public Vector3d direction;
-
-            /// <summary>
-            /// Distance (m) from the center of THIS quad to its furthest corner. Measured here because there
-            /// is no quad left to measure at load time, and it is what sizes the decal covering it.
-            /// </summary>
-            public double halfDiagonal;
-
-            /// <summary>The decal that already owns this quad, or null. Only meaningful in flight.</summary>
-            public PQSMod_MapDecalVertexRemoveScatter owner;
-        }
-
-        /// <summary>Measured shape of one quad, for diagnostics only. Lengths in meters.</summary>
-        public struct QuadShape
-        {
-            /// <summary>Side length along each grid axis, averaged over its opposite pair.</summary>
-            public double sideA;
-            public double sideB;
-
-            /// <summary>
-            /// Closest and furthest corner from the quad center. They differ as soon as the quad is a
-            /// parallelogram rather than a rectangle, which is the rule away from a face's median lines.
-            /// </summary>
-            public double halfDiagonalMin;
-            public double halfDiagonalMax;
-        }
-
         // The reference patch every quad is built from spans [-0.5, +0.5] on X and Z (PQS.CreateCache, with
         // cacheMeshSize = 1); quadMatrix maps it onto the quad's cell of its cube face.
         //
@@ -70,21 +33,6 @@ namespace com.github.lhervier.ksp.bulldozermod.terrain
             new Vector3( 0.5f, 0f,  0.5f),
             new Vector3(-0.5f, 0f,  0.5f)
         };
-
-        /// <summary>
-        /// Rough edge length (m) of a leaf quad, from the sphere alone. DIAGNOSTICS ONLY — never size
-        /// anything with it, and never use it as a search radius.
-        ///
-        /// It assumes quads are spread evenly in ANGLE, but a PQS is a projected cube: they are even on the
-        /// FACE PLANE. It therefore UNDER-estimates, by up to 4/pi (27%). Measured on the Mun (maxLevel 9,
-        /// formula = 614 m): 781 m at the pole (center of a face, the 4/pi maximum), 741 m near the equator,
-        /// 313 x 478 m at 45 deg (face border) — where the quad is not even square. An earlier version sized
-        /// a search radius with it and found NO quad at all while the vessel sat on the corner of four.
-        /// </summary>
-        public static double NominalQuadEdge(PQS sphere)
-        {
-            return (Math.PI * 0.5 * sphere.radius) / Math.Pow(2.0, sphere.maxLevel);
-        }
 
         /// <summary>
         /// Returns the leaf quads a disk of <paramref name="radius"/> meters centered on
@@ -244,72 +192,18 @@ namespace com.github.lhervier.ksp.bulldozermod.terrain
         /// Furthest a corner sits from the quad center, in meters. Exact, and needs no neighbour — unlike a
         /// measurement taken on PQ.north/east, it still works at the rim of the subdivided area.
         /// </summary>
-        public static double HalfDiagonal(CelestialBody body, Vector3d[] corners, Vector3d quadCenter)
+        private static double HalfDiagonal(CelestialBody body, Vector3d[] corners, Vector3d quadCenter)
         {
             double max = 0.0;
             for (int i = 0; i < 4; i++)
             {
-                double d = AngleBetween(quadCenter, corners[i]) * body.Radius;
+                double d = MathUtils.AngleBetween(quadCenter, corners[i]) * body.Radius;
                 if (d > max)
                 {
                     max = d;
                 }
             }
             return max;
-        }
-
-        /// <summary>
-        /// Measures one quad's shape. Diagnostics: a quad is neither square nor uniform across a cube face,
-        /// so its size is always measured, never computed.
-        /// </summary>
-        public static bool TryMeasureShape(CelestialBody body, PQ quad, out QuadShape shape)
-        {
-            shape = new QuadShape();
-
-            Vector3d[] corners = new Vector3d[4];
-            if (!TryGetCorners(quad, corners))
-            {
-                return false;
-            }
-
-            // Each side is averaged over its opposite pair: on a parallelogram the two differ slightly, and
-            // neither one alone describes the quad.
-            shape.sideA = (AngleBetween(corners[0], corners[1]) + AngleBetween(corners[3], corners[2]))
-                          * 0.5 * body.Radius;
-            shape.sideB = (AngleBetween(corners[1], corners[2]) + AngleBetween(corners[0], corners[3]))
-                          * 0.5 * body.Radius;
-
-            Vector3d quadCenter = quad.positionPlanetRelative;
-            shape.halfDiagonalMin = double.MaxValue;
-            shape.halfDiagonalMax = 0.0;
-            for (int i = 0; i < 4; i++)
-            {
-                double d = AngleBetween(quadCenter, corners[i]) * body.Radius;
-                if (d < shape.halfDiagonalMin)
-                {
-                    shape.halfDiagonalMin = d;
-                }
-                if (d > shape.halfDiagonalMax)
-                {
-                    shape.halfDiagonalMax = d;
-                }
-            }
-            return true;
-        }
-
-        /// <summary>Angle (rad) between two unit directions, safe against rounding past 1.</summary>
-        public static double AngleBetween(Vector3d a, Vector3d b)
-        {
-            double dot = Vector3d.Dot(a, b);
-            if (dot > 1.0)
-            {
-                dot = 1.0;
-            }
-            else if (dot < -1.0)
-            {
-                dot = -1.0;
-            }
-            return Math.Acos(dot);
         }
 
         // A cap of angular radius asin(sinAlpha) is entirely outside a half-space when its center sits

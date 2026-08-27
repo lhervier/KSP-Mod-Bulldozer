@@ -122,7 +122,7 @@ namespace com.github.lhervier.ksp.bulldozermod
 
             // The quads are captured HERE, in flight: at load time the terrain is not built yet and their
             // geometry cannot be recovered.
-            List<QuadLocator.QuadRef> quads = QuadLocator.FindImpactedQuads(
+            List<QuadRef> quads = QuadLocator.FindImpactedQuads(
                 body, vessel.latitude, vessel.longitude, ClearRadius);
             if (quads.Count == 0)
             {
@@ -133,7 +133,7 @@ namespace com.github.lhervier.ksp.bulldozermod
 
             // Refuse now rather than after a pointless reload: a quad already claimed by another mod's decal
             // can never take ours (Parallax allows one decal per quad).
-            foreach (QuadLocator.QuadRef quad in quads)
+            foreach (QuadRef quad in quads)
             {
                 if (quad.owner != null && !(quad.owner is BulldozerScatterDecal))
                 {
@@ -152,7 +152,7 @@ namespace com.github.lhervier.ksp.bulldozermod
                 radius = ClearRadius,
                 maxLevel = body.pqsController.maxLevel
             };
-            foreach (QuadLocator.QuadRef quad in quads)
+            foreach (QuadRef quad in quads)
             {
                 action.quads.Add(new BulldozerAction.ImpactedQuad
                 {

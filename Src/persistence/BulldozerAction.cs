@@ -29,7 +29,7 @@ namespace com.github.lhervier.ksp.bulldozermod.persistence
         {
             /// <summary>
             /// Center direction in body frame, straight from PQ.positionPlanetRelative. Deliberately not
-            /// lat/lon: see QuadLocator.QuadRef for why that round-trip is unsafe.
+            /// lat/lon: see QuadRef for why that round-trip is unsafe.
             /// </summary>
             public Vector3d direction;
 

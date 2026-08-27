@@ -3,6 +3,7 @@ using UnityEngine;
 using Parallax;
 using Parallax.PQS_Mods;
 using com.github.lhervier.ksp.bulldozermod.terrain;
+using com.github.lhervier.ksp.bulldozermod.utils;
 
 namespace com.github.lhervier.ksp.bulldozermod.diagnostics
 {
@@ -77,7 +78,7 @@ namespace com.github.lhervier.ksp.bulldozermod.diagnostics
                 {
                     continue;
                 }
-                double dist = QuadLocator.AngleBetween(quad.positionPlanetRelative, vesselDir) * body.Radius;
+                double dist = MathUtils.AngleBetween(quad.positionPlanetRelative, vesselDir) * body.Radius;
                 ranked.Add(new KeyValuePair<PQ, double>(quad, dist));
             }
             ranked.Sort((a, b) => a.Value.CompareTo(b.Value));
@@ -107,22 +108,22 @@ namespace com.github.lhervier.ksp.bulldozermod.diagnostics
             sb.AppendLine("");
             sb.AppendLine($"spread over {shown}: {spread:F1} m");
 
-            List<QuadLocator.QuadRef> impacted = QuadLocator.FindImpactedQuads(
+            List<QuadRef> impacted = QuadLocator.FindImpactedQuads(
                 body, vessel.latitude, vessel.longitude, BulldozerCleanModule.ClearRadius);
 
             // The two sides are shown separately on purpose: a quad is not square, and the gap between them
             // grows towards the edges of a cube face (1.41x at 45 deg). The two half-diagonals expose the
             // skew on top of that: they are equal only where the quad is a true rectangle.
-            QuadLocator.QuadShape shape;
-            if (QuadLocator.TryMeasureShape(body, ranked[0].Key, out shape))
+            QuadMetrics.QuadShape shape;
+            if (QuadMetrics.TryMeasureShape(body, ranked[0].Key, out shape))
             {
                 sb.AppendLine($"sides {shape.sideA:F0} x {shape.sideB:F0} m " +
-                              $"(nominal {QuadLocator.NominalQuadEdge(sphere):F0} m)");
+                              $"(nominal {QuadMetrics.NominalQuadEdge(sphere):F0} m)");
                 sb.AppendLine($"half-diag {shape.halfDiagonalMin:F0} .. {shape.halfDiagonalMax:F0} m");
             }
             else
             {
-                sb.AppendLine($"shape not measurable (nominal {QuadLocator.NominalQuadEdge(sphere):F0} m)");
+                sb.AppendLine($"shape not measurable (nominal {QuadMetrics.NominalQuadEdge(sphere):F0} m)");
             }
 
             sb.AppendLine($"a {BulldozerCleanModule.ClearRadius:F0} m clean here would touch {impacted.Count} quad(s)");
@@ -134,7 +135,7 @@ namespace com.github.lhervier.ksp.bulldozermod.diagnostics
             {
                 double biggest = 0.0;
                 long kilobytes = 0L;
-                foreach (QuadLocator.QuadRef quad in impacted)
+                foreach (QuadRef quad in impacted)
                 {
                     double quadFootprint = quad.halfDiagonal * ScatterCleaner.FootprintMargin;
                     if (quadFootprint > biggest)
