@@ -63,15 +63,41 @@ namespace com.github.lhervier.ksp.bulldozermod
             }
         }
 
+        /// <summary>
+        /// Shows, in place, which rocks a clean would remove — and stops on the next click.
+        ///
+        /// Prototype stand-in for the real area picker: the point is that the player can SEE the outcome
+        /// before committing to a reload, in particular that removal works per cluster, not per boulder.
+        /// </summary>
+        [KSPEvent(guiActive = true, guiActiveEditor = false, active = true,
+                  guiName = "#LOC_BulldozerMod_highlightOn")]
+        public void ToggleHighlight()
+        {
+            ScatterHighlighter.Active = !ScatterHighlighter.Active;
+            SyncHighlightLabel();
+        }
+
         public override void OnStart(StartState state)
         {
             base.OnStart(state);
 
-            // Nothing to clear without Parallax: hide the entry rather than offer a no-op.
+            // Nothing to clear without Parallax: hide the entries rather than offer a no-op.
             if (!ParallaxInterop.Available)
             {
                 Events["ClearScatters"].guiActive = false;
+                Events["ToggleHighlight"].guiActive = false;
+                return;
             }
+
+            // The flag outlives the scene, so the label has to be re-derived rather than assumed off.
+            SyncHighlightLabel();
+        }
+
+        // A toggle's label must announce what the NEXT click does, not the current state.
+        private void SyncHighlightLabel()
+        {
+            Events["ToggleHighlight"].guiName =
+                ModLocalization.GetString(ScatterHighlighter.Active ? "highlightOff" : "highlightOn");
         }
 
         private void RecordAndReload()

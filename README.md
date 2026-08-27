@@ -346,11 +346,61 @@ Le mod ne se chargeait pas du tout (KSPCommunityFixes l'affiche en clair au dém
 
 Le nom déclaré est **`Parallax`** — celui du `[KSPAssembly]` de Parallax, pas son nom de fichier (voir aussi le piège `LoadedAssembly.name` dans le [CLAUDE.md parent](../CLAUDE.md)). Effet de bord souhaitable : sans Parallax, KSP écarte proprement le mod au lieu de planter.
 
-### Deux limites observées en jeu
+### Limites observées en jeu
 
 **Près du KSC, rien ne se nettoie.** Parallax y pose son propre decal, `ParallaxMaskKSC` (`radius = 1400` m, donc une portée de `atan(1400/600000) × 4` ≈ **5,6 km**), et un quad n'accepte qu'un seul decal : le nôtre est ignoré sur tous les quads déjà pris, silencieusement. Le log le nomme désormais explicitement (`Quad already owned by 'ParallaxMaskKSC'`). Sans conséquence pour l'usage visé — on ne construit pas de base sur le KSC — mais à savoir pour ne pas croire à une panne.
 
 **Le nettoyage peut être partiel selon l'instant.** Un essai a laissé fleurs et herbes éparses ; le diagnostic montrait alors que le quad portant le vaisseau **n'était pas** pris en charge (le plus proche connu de Parallax était à 752 m, au-delà des 651 m possibles pour un quad de 920 m d'arête). Les scatters de ce quad avaient donc été générés sans notre masque. Rejoué au même endroit, le résultat était parfait. **Piste** : un quad ne s'enregistre qu'à sa construction (`isBuilt` n'est remis à `false` que dans `Awake()`), donc tout quad déjà bâti au moment de l'injection est perdu pour la passe. À surveiller si le cas se reproduit.
+
+### ⚠️ EN COURS — ombres fantômes après surlignage + rechargement (cause INCONNUE)
+
+**Ouvert le 2026-08-25, non résolu.** Ne pas repartir de zéro : voici ce qui est établi et ce qui est déjà écarté.
+
+#### Symptôme
+
+Des formes sombres restent au sol, à l'emplacement de rochers **bien réels**, décalées de leur objet — on les fait coïncider en bougeant la caméra.
+
+#### Reproduction (stricte)
+
+1. activer le surlignage (entrée PAW) ;
+2. avoir **effectivement** des rochers surlignés à l'écran ;
+3. recharger la partie ;
+4. les ombres apparaissent, **sur exactement les rochers qui avaient été dessinés**.
+
+Aucun nettoyage requis : ça se produit sur un terrain vierge, scénario sans la moindre action.
+
+#### Établi par bisection en jeu
+
+| Essai | Ombres ? |
+|---|---|
+| Surlignage **éteint** avant le rechargement | non |
+| Surlignage allumé mais rover en zone vide — **aucun rocher dessiné** | non |
+| Surlignage allumé **avec des rochers dessinés**, puis rechargement | **oui** |
+
+⇒ ce sont **nos appels `Graphics.DrawMesh`**, et uniquement ceux réellement émis. Et elles n'apparaissent qu'**après** le rechargement.
+
+Autres faits : éteindre le surlignage ne les efface pas (à reconfirmer, cf. plus bas) ; un second rechargement les efface ; laisser KSP en arrière-plan les efface aussi.
+
+#### Écarté — ne pas refaire
+
+| Hypothèse | Testée par | Verdict |
+|---|---|---|
+| Ce sont les ombres de Parallax (ses scatters sont dessinés en `ShadowCastingMode.On`) | essai « zone vide » | **faux** — sans dessin de notre part, rien |
+| On dessine pendant la reconstruction de la scène (`Active` est `static`) | garde-fou `LoadedSceneIsFlight && FlightGlobals.ready` | **sans effet** |
+| `camera: null` diffuse le dessin à toutes les caméras | passage à `Camera.main` | **sans effet** |
+| Notre `Material` est détruit au changement de scène, laissant des entrées de rendu orphelines | `static` + `HideAndDontSave`, `OnDestroy` supprimé | **sans effet** |
+
+Les trois correctifs sont **conservés** — chacun se justifie indépendamment — mais aucun n'est la cause.
+
+#### Pistes pour la reprise
+
+1. **Reconfirmer que l'extinction du surlignage ne les efface pas.** Toute l'analyse repose là-dessus et ça n'a pas été revérifié depuis plusieurs itérations. Si elles disparaissent, ce sont nos maillages rendus en sombre, et il faut chercher du côté du matériau **actif** (shader retenu, `renderQueue = 3100`, `_MainTex`) et non de son cycle de vie.
+2. **Dessiner avec un matériau qu'on ne crée ni ne détruit** — celui de Parallax (`scatter.renderer.instancedMaterialLOD0`). Les rochers ne seront plus rouges, mais si l'artefact disparaît c'est notre matériau, s'il persiste c'est l'appel de dessin lui-même.
+3. **Varier un paramètre à la fois** : `receiveShadows`, le layer (15), le `renderQueue`, l'inflation ×1,03, et le maillage (LOD0 de Parallax vs un cube maison). Le maillage maison est intéressant : on partage actuellement les `Mesh` de Parallax entre deux chemins de rendu.
+
+#### Contournement en attendant
+
+Un rechargement ou une mise en arrière-plan les efface. Pour rendre le bug inatteignable, forcer `ScatterHighlighter.Active = false` au démarrage de la scène (le joueur rallume après le rechargement) — **contournement, pas correctif**.
 
 ## 6. Ce qui reste à faire
 
