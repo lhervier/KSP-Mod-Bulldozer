@@ -119,17 +119,17 @@ MaskSize     = round(côté couvert / 5)     borné à [32, 2048]
 
 | Corps | Arête du quad | Côté couvert | `MaskSize` | Mémoire |
 |---|---|---|---|---|
-| Gilly (9) | 51 m | 79 m | 32 (plancher) | 2 Ko |
-| Mun à 45° | 313 × 478 m | 629 m | 126 | 32 Ko |
-| Mun (9) | 781 m | 1215 m | 243 | 118 Ko |
-| Kerbin (9) | 1405 m | 2186 m | 437 | 382 Ko |
-| Eve (9) | 2734 m | 4253 m | 851 | 1,45 Mo |
+| Gilly (9) | 51 m | 79 m | 32 (plancher) | 1 Ko |
+| Mun à 45° | 313 × 478 m | 629 m | 126 | 15 Ko |
+| Mun (9) | 781 m | 1215 m | 243 | 58 Ko |
+| Kerbin (9) | 1405 m | 2186 m | 437 | 187 Ko |
+| Eve (9) | 2734 m | 4253 m | 851 | 707 Ko |
 
 Contre **8 Mo par quad partout** aujourd'hui. Les bornes ne sont que des garde-fous : aucun corps stock n'atteint le plafond (il faudrait une arête de quad > 6,5 km), et le plancher n'existe que pour éviter les textures dégénérées sur les très petits corps.
 
 **Pas d'arrondi à la puissance de deux.** C'est la seule vraie source d'imprécision sur les 5 m : arrondir 851 → 1024 sur Eve donnerait des cases de **4,15 m** (17 % d'écart), différent sur chaque corps. Avec la taille exacte, l'écart tombe sous le millième (le simple arrondi à l'entier), et une `Texture2D` NPOT en bilinéaire + clamp ne pose aucun problème. Si les 5 m deviennent un **contrat de gameplay** (sélection par cases), c'est indispensable.
 
-**La mémoire compte double.** `ScatterMask` retient le `byte[] _pixels` (pour les `DrawDisk` suivants) *et* la `Texture2D`. Les chiffres ci-dessus incluent les deux ; le commentaire du fichier qui annonce « 4 Mo par quad » ne comptait que la texture.
+**Un seul octet par pixel, et une seule copie.** `ScatterMask` ne garde **pas** de `byte[]` à côté de sa texture : il écrit dans les pixels de la `Texture2D` elle-même, via `GetRawTextureData<byte>()` — qui n'est pas une copie mais une **vue** (`NativeArray<byte>` construit par `ConvertExistingDataToNativeArray(GetWritableImageData(0), …, Allocator.None)`, vérifié dans `UnityEngine.CoreModule.dll`). Les chiffres ci-dessus sont donc `MaskSize²` octets, un point c'est tout. Deux conséquences à ne pas casser : la texture doit rester **lisible** (`Apply(false, false)`, jamais `makeNoLongerReadable: true`, sinon `GetRawTextureData` lève), et la vue se **relit à chaque usage** plutôt que se mettre en cache, sa validité n'étant garantie que jusqu'à la prochaine modification de la texture.
 
 **La taille est dérivée, jamais persistée.** Elle se recalcule au chargement depuis le `halfDiag` du quad, puisque les masques sont reconstruits en rejouant les disques. La stocker exposerait à un changement de preset de détail (`maxLevel` change → l'arête change → la taille attendue change) — ce que le garde-fou `action.maxLevel` détecte et refuse déjà.
 

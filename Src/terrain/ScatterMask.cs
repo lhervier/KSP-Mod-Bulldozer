@@ -1,4 +1,5 @@
 using System;
+using Unity.Collections;
 using UnityEngine;
 using com.github.lhervier.ksp.shared;
 
@@ -39,7 +40,6 @@ namespace com.github.lhervier.ksp.bulldozermod.terrain
         private const byte Clear = 0;
 
         private readonly int _size;
-        private readonly byte[] _pixels;
         private readonly Texture2D _texture;
 
         /// <summary>Half-width (m) of the square the mask covers; also the decal's radius.</summary>
@@ -85,15 +85,7 @@ namespace com.github.lhervier.ksp.bulldozermod.terrain
             DecalRadius = decalRadius;
             _size = SizeFor(decalRadius);
 
-            _pixels = new byte[_size * _size];
-            for (int i = 0; i < _pixels.Length; i++)
-            {
-                _pixels[i] = Keep;
-            }
-
-            // R8 rather than RGBA32: the shader only reads .r, so one byte per pixel instead of four. The
-            // buffer above is retained too (later DrawDisk calls complete the same mask), so the real cost
-            // is twice the texture.
+            // R8 rather than RGBA32: the shader only reads .r, so one byte per pixel instead of four.
             _texture = new Texture2D(_size, _size, TextureFormat.R8, false);
             _texture.name = "BulldozerScatterMask";
 
@@ -102,6 +94,12 @@ namespace com.github.lhervier.ksp.bulldozermod.terrain
             // at half a pixel, so a disk a handful of cells wide still reads as round rather than stepped.
             _texture.filterMode = FilterMode.Bilinear;
             _texture.wrapMode = TextureWrapMode.Clamp;
+
+            NativeArray<byte> pixels = Pixels;
+            for (int i = 0; i < pixels.Length; i++)
+            {
+                pixels[i] = Keep;
+            }
             Apply();
         }
 
@@ -134,6 +132,7 @@ namespace com.github.lhervier.ksp.bulldozermod.terrain
             int minY = Math.Max(0, (int)Math.Floor(centerY - radiusPx));
             int maxY = Math.Min(_size - 1, (int)Math.Ceiling(centerY + radiusPx));
 
+            NativeArray<byte> pixels = Pixels;
             for (int y = minY; y <= maxY; y++)
             {
                 double dy = (y + 0.5) - centerY;
@@ -143,7 +142,7 @@ namespace com.github.lhervier.ksp.bulldozermod.terrain
                     double dx = (x + 0.5) - centerX;
                     if (dx * dx + dy * dy <= radiusPxSq)
                     {
-                        _pixels[row + x] = Clear;
+                        pixels[row + x] = Clear;
                     }
                 }
             }
@@ -166,10 +165,23 @@ namespace com.github.lhervier.ksp.bulldozermod.terrain
             }
         }
 
-        // Raw upload: R8 holds one byte per pixel, in the same order as our buffer.
+        /// <summary>
+        /// The mask pixels, one byte per pixel in row order (R8 holds exactly that).
+        ///
+        /// This is a VIEW on the texture's own CPU-side buffer, not a copy: GetRawTextureData wraps the
+        /// existing allocation (Allocator.None), so there is no second copy of the mask to keep in sync and
+        /// nothing to dispose. Re-read at each use rather than cached, because the view is only guaranteed
+        /// valid until the texture is modified.
+        /// </summary>
+        private NativeArray<byte> Pixels
+        {
+            get { return _texture.GetRawTextureData<byte>(); }
+        }
+
+        // Pushes the CPU pixels written above to the GPU. No mipmaps, and the texture stays readable (it
+        // must: Pixels needs it, and later DrawDisk calls complete the same mask).
         private void Apply()
         {
-            _texture.LoadRawTextureData(_pixels);
             _texture.Apply(false, false);
         }
     }

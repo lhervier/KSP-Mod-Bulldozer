@@ -129,8 +129,10 @@ namespace com.github.lhervier.ksp.bulldozermod.diagnostics
             sb.AppendLine($"a {BulldozerCleanModule.ClearRadius:F0} m clean here would touch {impacted.Count} quad(s)");
 
             // What the decals would actually allocate, so a body with tiny or huge quads shows up here
-            // rather than as a memory surprise. Each quad is sized on its own half-diagonal, so the total is
-            // reported alongside the biggest one rather than a single figure "each".
+            // rather than as a memory surprise. One byte per pixel and nothing else: the mask is written
+            // straight into its R8 texture, there is no CPU-side copy beside it. Each quad is sized on its
+            // own half-diagonal, so the total is reported alongside the biggest one rather than a single
+            // figure "each".
             if (impacted.Count > 0)
             {
                 double biggest = 0.0;
@@ -143,7 +145,7 @@ namespace com.github.lhervier.ksp.bulldozermod.diagnostics
                         biggest = quadFootprint;
                     }
                     int quadPx = ScatterMask.SizeFor(quadFootprint);
-                    kilobytes += 2L * quadPx * quadPx / 1024L;
+                    kilobytes += (long)quadPx * quadPx / 1024L;
                 }
 
                 int px = ScatterMask.SizeFor(biggest);
