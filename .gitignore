@@ -4,3 +4,5 @@ bin/
 Release/
 *.user
 .vs/
+__pycache__/
+tools/renders/
