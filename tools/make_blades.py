@@ -392,8 +392,8 @@ def build_blade(name, width, x_offset=0.0):
 
     # One box collider over the lot. It stays at the origin with an identity matrix so io_object_mu
     # folds it onto the root object instead of adding a game object for it; the offset travels in
-    # muproperties.center. In flight the module turns it into a trigger anyway -- what it is really
-    # for is placing the part in the editor, and getLowestPoint().
+    # muproperties.center. It collides for real in flight: a blade left down ploughs the terrain and
+    # pins the rover, which is what forces the player to carry it on a robotic hinge.
     y_max = max(max(f[0] for f, _ in plate), max(ends))
     z_min = -EDGE_DROP
     z_max = max(max(front[1], back[1]) for front, back in section)
