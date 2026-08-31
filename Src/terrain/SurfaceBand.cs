@@ -19,7 +19,7 @@ namespace com.github.lhervier.ksp.bulldozermod.terrain
         /// </summary>
         public const double WidthStep = ScatterMask.MetersPerPixel;
 
-        /// <summary>Unit direction of the point the strip starts from (the vessel).</summary>
+        /// <summary>Unit direction of the point the strip starts from (the blade's cutting edge).</summary>
         public Vector3d origin;
 
         /// <summary>Unit direction the strip runs towards, tangent to the surface at <see cref="origin"/>.</summary>

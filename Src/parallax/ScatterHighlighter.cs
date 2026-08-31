@@ -40,10 +40,21 @@ namespace com.github.lhervier.ksp.bulldozermod.parallax
         private static readonly ModLogger LOGGER = new ModLogger("Highlight");
 
         /// <summary>
-        /// Toggled by the PAW entry. Static because this addon is destroyed and rebuilt at every scene
-        /// change, while the choice belongs to the player.
+        /// The blade whose pass is being previewed, or null when no preview is running.
+        ///
+        /// ONE at a time, and that is a cost decision rather than a UI one: a preview walks Parallax's quad
+        /// registry, rasterises the strip into every quad it touches and tests every loaded instance against
+        /// the resulting mask, on every frame. Two blades would double all of it. So turning one on turns
+        /// the others off, and each PAW re-derives its own label from this field.
+        ///
+        /// It doubles as the aim: the blade being previewed is the one the overlays follow, with ITS own
+        /// length and width. Nothing else needs to track "the blade the player is working with".
+        ///
+        /// Static because this addon is destroyed and rebuilt at every scene change, while the choice
+        /// belongs to the player — but a blade does not survive a scene change, so the preview goes out on
+        /// its own when one happens, rather than pointing at a destroyed part.
         /// </summary>
-        public static bool Active;
+        public static BulldozerCleanModule Source;
 
         // Local Scenery. The scatters carry no renderer of their own, so there is no layer to inherit; this
         // one is drawn by the flight camera and is where the terrain lives.
@@ -85,7 +96,8 @@ namespace com.github.lhervier.ksp.bulldozermod.parallax
 
         private void Update()
         {
-            if (!Active)
+            BulldozerCleanModule blade = Source;
+            if (blade == null)
             {
                 _summaryLogged = false;
                 _warnedNoRegistry = false;
@@ -95,7 +107,7 @@ namespace com.github.lhervier.ksp.bulldozermod.parallax
                 return;
             }
 
-            // Draw ONLY on a settled flight scene. Active is static, so it survives a scene change and we
+            // Draw ONLY on a settled flight scene: the blade outlives the frame it was picked in, and we
             // would otherwise keep drawing all through a reload, while quads and their GPU buffers are being
             // torn down and rebuilt — pointless at best.
             //
@@ -106,8 +118,16 @@ namespace com.github.lhervier.ksp.bulldozermod.parallax
                 return;
             }
 
-            Vessel vessel = FlightGlobals.ActiveVessel;
-            if (vessel == null || vessel.mainBody == null || vessel.packed)
+            // The blade's own vessel, not the active one: a preview started from a rover parked next door
+            // must show that rover's strip. A blade whose part is gone (destroyed, unloaded) puts the
+            // preview out rather than drawing nowhere.
+            Vessel vessel = blade.part == null ? null : blade.vessel;
+            if (vessel == null || vessel.mainBody == null)
+            {
+                Source = null;
+                return;
+            }
+            if (vessel.packed)
             {
                 return;
             }
@@ -126,10 +146,10 @@ namespace com.github.lhervier.ksp.bulldozermod.parallax
 
             CelestialBody body = vessel.mainBody;
 
-            // The strip a click would apply right now, built by the very code the click uses.
+            // The strip a click would apply right now, built by the very code the click uses, off the very
+            // blade that would apply it.
             SurfaceBand band;
-            if (!BulldozerCleanModule.TryBuildBand(vessel, BulldozerCleanModule.SelectedLength,
-                                                  BulldozerCleanModule.SelectedWidth, out band))
+            if (!BulldozerCleanModule.TryBuildBand(blade, blade.passLength, blade.passWidth, out band))
             {
                 return;
             }
@@ -161,7 +181,7 @@ namespace com.github.lhervier.ksp.bulldozermod.parallax
                 return;
             }
 
-            Vector3d vesselWorld = vessel.GetWorldPos3D();
+            Vector3d originWorld = blade.OriginPoint;
 
             EnsureCounters();
 
@@ -185,9 +205,10 @@ namespace com.github.lhervier.ksp.bulldozermod.parallax
                 // Reject whole quads before touching their instances. Without this the loop walks every
                 // collideable instance Parallax has loaded — measured at 59 000 on the Mun for the 8 that
                 // were actually in range. A quad matters only if it comes within reach of the strip plus its
-                // own width; the strip never runs further than its length from the vessel.
+                // own width; the strip never runs further than its length from the blade's edge, which is
+                // where it starts.
                 double quadReach = band.length + band.width + Math.Sqrt(quadData.sqrQuadWidth);
-                if ((((Vector3d)quadData.quad.gameObject.transform.position) - vesselWorld).sqrMagnitude
+                if ((((Vector3d)quadData.quad.gameObject.transform.position) - originWorld).sqrMagnitude
                     > quadReach * quadReach)
                 {
                     continue;
@@ -294,7 +315,7 @@ namespace com.github.lhervier.ksp.bulldozermod.parallax
 
             if (!_summaryLogged && total > 0)
             {
-                LogSummary(body, shown, total);
+                LogSummary(body, blade, shown, total);
                 _summaryLogged = true;
             }
             else if (shown != _lastShown || total != _lastTotal)
@@ -316,11 +337,11 @@ namespace com.github.lhervier.ksp.bulldozermod.parallax
         // One breakdown per activation. It answers the two questions this overlay always raises: how much
         // Parallax has actually loaded around the vessel, and WHICH families it can never show — the
         // non-collideable ones are wiped by a clean just the same, they simply have no per-instance data.
-        private void LogSummary(CelestialBody body, int shown, int total)
+        private void LogSummary(CelestialBody body, BulldozerCleanModule blade, int shown, int total)
         {
             LOGGER.LogInfo($"Highlighting {shown} of {total} collideable instance(s) loaded around the " +
-                           $"vessel, for a {BulldozerCleanModule.SelectedLength:F0} x " +
-                           $"{BulldozerCleanModule.SelectedWidth:F0} m pass");
+                           $"vessel, for a {blade.passLength:F0} x {blade.passWidth:F0} m pass " +
+                           $"by '{blade.part.partInfo?.title}'");
 
             Scatter[] scatters = Parallax.CollisionManager.collideableScatters;
             for (int i = 0; i < _loaded.Length; i++)
@@ -407,7 +428,7 @@ namespace com.github.lhervier.ksp.bulldozermod.parallax
             if (_material == null)
             {
                 // Nothing can be drawn at all, so stop pretending the overlay is on.
-                Active = false;
+                Source = null;
             }
             return _material;
         }

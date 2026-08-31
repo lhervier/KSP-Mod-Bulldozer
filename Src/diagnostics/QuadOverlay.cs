@@ -2,6 +2,7 @@ using System.Collections.Generic;
 using UnityEngine;
 using Parallax;
 using Parallax.PQS_Mods;
+using com.github.lhervier.ksp.bulldozermod.parallax;
 using com.github.lhervier.ksp.bulldozermod.terrain;
 using com.github.lhervier.ksp.bulldozermod.utils;
 
@@ -108,10 +109,14 @@ namespace com.github.lhervier.ksp.bulldozermod.diagnostics
             sb.AppendLine("");
             sb.AppendLine($"spread over {shown}: {spread:F1} m");
 
-            // The pass the PAW currently offers, so this line answers "what would a click do HERE".
-            SurfaceBand band;
-            bool aimed = BulldozerCleanModule.TryBuildBand(
-                vessel, BulldozerCleanModule.SelectedLength, BulldozerCleanModule.SelectedWidth, out band);
+            // The pass the previewed blade currently offers, so this line answers "what would a click do
+            // HERE". It needs a blade to read: with no preview running there is no strip to report on, and
+            // guessing one from the vessel would answer a different question.
+            BulldozerCleanModule blade = ScatterHighlighter.Source;
+            // Initialised because the short-circuit below leaves it untouched when there is no blade.
+            SurfaceBand band = new SurfaceBand();
+            bool aimed = blade != null
+                && BulldozerCleanModule.TryBuildBand(blade, blade.passLength, blade.passWidth, out band);
             List<QuadRef> impacted = aimed
                 ? QuadLocator.FindImpactedQuads(body, band)
                 : new List<QuadRef>();
@@ -131,10 +136,12 @@ namespace com.github.lhervier.ksp.bulldozermod.diagnostics
                 sb.AppendLine($"shape not measurable (nominal {QuadMetrics.NominalQuadEdge(sphere):F0} m)");
             }
 
-            sb.AppendLine(aimed
-                ? $"a {band.length:F0} x {band.width:F0} m pass here would touch " +
-                  $"{impacted.Count} quad(s)"
-                : "no usable heading: the control point must look along the ground");
+            sb.AppendLine(blade == null
+                ? "no blade previewing: switch a blade's preview on to see what a pass would touch"
+                : aimed
+                    ? $"a {band.length:F0} x {band.width:F0} m pass here would touch " +
+                      $"{impacted.Count} quad(s)"
+                    : "no usable heading: the blade must look along the ground");
 
             // What the decals would actually allocate, so a body with tiny or huge quads shows up here
             // rather than as a memory surprise. One byte per pixel and nothing else: the mask is written

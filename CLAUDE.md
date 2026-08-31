@@ -137,7 +137,13 @@ Les corps en gras sont **mesurés en jeu** (dumps du 2026-08-27, terrain detail 
 
 ### La passe de lame — et pourquoi la pixelisation devient le sujet
 
-Le geste est un **rectangle** partant du **centre du vaisseau vers l'avant**, **longueur de 5 à 200 m** et **largeur de 5 à 20 m**, les deux au pas de 5 m (= une case de masque) et réglables dans le PAW. Défaut : 50 × 10 m. La direction est le **cap du navball** — l'axe `+up` du point de contrôle (`NavBall` cible `ActiveVessel.ReferenceTransform`) projeté sur l'horizontale — donc « control from here » vise la passe comme il pilote le rover. Si cet axe est plus vertical qu'horizontal, la passe est **refusée** : sa projection horizontale ne veut plus rien dire (voir « Règles de refus » ci-dessous — c'est un piège qui a coûté cher).
+Le geste est un **rectangle** partant du **tranchant de la lame, dans la direction qu'elle regarde**, **longueur de 5 à 200 m** et **largeur de 5 à 20 m**, les deux au pas de 5 m (= une case de masque) et réglables dans le PAW. Défaut : 50 × 10 m.
+
+**La passe appartient à la lame, pas au vaisseau** — origine *et* direction. C'est ce qui fait de la lame un outil qu'on **porte** plutôt qu'une propriété du rover : une lame déportée sur un bras nettoie le sol qu'elle survole vraiment, une lame montée à l'arrière envoie sa passe en arrière, et deux lames sur un même châssis font deux passes différentes au lieu de la même deux fois. L'origine est **le point même** que mesure `BladeStance` : ce qu'on vérifie être au ras du sol est exactement ce d'où la passe part.
+
+Conséquence assumée : le sol **sous le rover**, derrière la lame, n'est plus nettoyé — un bulldozer pousse devant lui.
+
+La direction vient de `bladeFace`, un empty du modèle sans aucune rotation (son `forward` Unity est le +Y de Blender, cf. §6). **Repli** pour un modèle qui n'en déclare pas : le **cap du navball** — l'axe `+up` du point de contrôle (`NavBall` cible `ActiveVessel.ReferenceTransform`) — donc « control from here » vise alors la passe comme il pilote le rover. Dans les deux cas, si l'axe est plus vertical qu'horizontal la passe est **refusée** : sa projection horizontale ne veut plus rien dire (voir « Règles de refus » ci-dessous — c'est un piège qui a coûté cher).
 
 ⚠️ **5 m de large = UNE case de masque. C'est la limite de résolution, et ça change tout.**
 
@@ -272,7 +278,7 @@ Ce que la lecture de la source Parallax a permis d'**écarter** au passage (à n
 
 ### Contraintes
 
-- **Bande rectangulaire** partant du centre du vaisseau vers l'avant, **5 à 200 m de long** et **5 à 20 m de large**, réglables dans le PAW au pas de 5 m.
+- **Bande rectangulaire** partant du tranchant de la lame, dans la direction qu'elle regarde, **5 à 200 m de long** et **5 à 20 m de large**, réglables dans le PAW au pas de 5 m.
 - **Aucune modification du relief.** Choix structurant, pas une simplification : ne pas toucher à la hauteur supprime **par construction** toute la famille de problèmes qui a tué l'objectif précédent (§3) — pas de mesh de quad reconstruit différemment de ses voisins, donc ni trou ni fissure de LOD ; pas de sol qui monte ou descend sous un vaisseau posé, donc ni encastrement, ni explosion au rechargement, ni re-seating à gérer.
 - **Persistant** : la zone nettoyée doit le rester après sauvegarde, rechargement, et redémarrage de KSP.
 - **Application par sauvegarde + rechargement**, sur une **save dédiée** (`"BulldozerReload"`, jamais `"persistent"` : le rechargement est une manœuvre du mod, pas une sauvegarde voulue par le joueur, et un autosave de sortie de scène pourrait l'écraser). Le nettoyage n'a pas besoin d'être immédiat, et le rechargement garantit une injection **à froid**, avant que KSP ne bâtisse le PQS, vaisseau *packed*.
@@ -293,7 +299,7 @@ Le squelette de persistance et d'application « à froid » a été conservé ; 
 
 | Fichier | Rôle |
 |---|---|
-| `Src/BulldozerCleanModule.cs` | Le `PartModule` des trois lames : entrée PAW **« Passer la lame »**, curseurs **longueur** (5→200 m) et **largeur** (5→20 m) par pas de 5 m, **usure restante**, **coût de la passe**, **hauteur au sol** et **inclinaison** en direct. Construit la bande, relève les quads impactés, applique les règles de refus **et le quota**, débite la lame, enregistre l'action puis save+reload. `TryBuildBand` est **partagé** avec les deux overlays, qui doivent viser la bande exacte du clic |
+| `Src/BulldozerCleanModule.cs` | Le `PartModule` des trois lames : entrée PAW **« Passer la lame »**, curseurs **longueur** (5→200 m) et **largeur** (5→20 m) par pas de 5 m, **usure restante**, **coût de la passe**, **hauteur au sol** et **inclinaison** en direct. Construit la bande, relève les quads impactés, applique les règles de refus **et le quota**, débite la lame, enregistre l'action puis save+reload. `TryBuildBand` ne prend qu'une **lame** — origine = son tranchant, direction = son `bladeFace` — et c'est le **seul** chemin : les calques l'appellent aussi, avec la lame en aperçu, pour viser la bande exacte du clic |
 | `Src/terrain/PassCost.cs` | Ce qu'une passe coûte : les cases qu'elle ferait passer de blanc à noir, **chacune imputée au seul quad qui la possède**. Repasser sur du propre est gratuit ; nettoyer un terrain sans cailloux est plein tarif |
 | `GameData/BulldozerMod/Parts/*.cfg` | Les trois lames (BD-2 / BD-3 / BD-5), branchées sur leurs propres modèles |
 | `GameData/BulldozerMod/Parts/*.mu` | Les maillages, **produits de build** : ne jamais les éditer, relancer le générateur |
@@ -301,13 +307,13 @@ Le squelette de persistance et d'application « à froid » a été conservé ; 
 | `tools/render_blades.py` | Rend les trois lames en PNG en **important** le générateur — donc jamais une seconde description de la forme. Cadrage et focale **ajustés** à la géométrie, pour que les vues ne sortent pas du champ en silence quand les constantes changent. Sort dans `tools/renders/`, **non versionné** : ce sont des rendus de contrôle, à régénérer, pas du contenu de dépôt |
 | `Src/parallax/ParallaxInterop.cs` | Tout ce qu'on fait avec Parallax : pose du decal, liste des scatters d'un corps, purge du registre statique. **Compilé contre `ParallaxContinued.dll`** : une évolution de son API casse le build, pas le vol |
 | `Src/parallax/BulldozerScatterDecal.cs` | Le decal lui-même : sous-classe du PQSMod de Parallax, **attachée à un seul quad** (celui dont elle occupe le centre). `RotationFor` = source unique du `rot` du masque |
-| `Src/parallax/ScatterHighlighter.cs` | L'aperçu, et **la seule chose qui dit la vérité** sur ce qu'une passe enlèvera : pour chaque quad en portée il construit le masque que l'injection construirait (`ScatterCleaner.RasterFor`) et pose au shader sa propre question (bilinéaire, `< 0.5`) à la position de chaque instance. Montre donc la pixelisation, les décrochements de couture et les quads pris par un autre mod. Ne voit que les scatters **collidables** — l'herbe part aussi, sans jamais avoir été surlignée, et seulement ceux que Parallax a **chargés** : c'est `BandTrace` qui couvre le reste de la bande |
+| `Src/parallax/ScatterHighlighter.cs` | L'aperçu, et **la seule chose qui dit la vérité** sur ce qu'une passe enlèvera. Porte `Source`, la lame en cours de prévisualisation — **une seule à la fois** (coût), et c'est elle que tous les calques visent : pour chaque quad en portée il construit le masque que l'injection construirait (`ScatterCleaner.RasterFor`) et pose au shader sa propre question (bilinéaire, `< 0.5`) à la position de chaque instance. Montre donc la pixelisation, les décrochements de couture et les quads pris par un autre mod. Ne voit que les scatters **collidables** — l'herbe part aussi, sans jamais avoir été surlignée, et seulement ceux que Parallax a **chargés** : c'est `BandTrace` qui couvre le reste de la bande |
 | `Src/parallax/BandTrace.cs` | **La zone, peinte au sol** : les cases que la passe noircirait, quad par quad. C'est ce qui montre le **bout** d'une passe de 200 m, là où le surlignage des rochers ne peut structurellement rien montrer. Dessine les **cases**, jamais le rectangle — donc la pixelisation, les coutures et les quads pris par un autre mod. Ne porte plus que le **quoi** et le **quand** : la géométrie est dans `GroundSheet` |
 | `Src/parallax/GroundSheet.cs` | **La géométrie de tout calque au sol** : mesurer des cases au raycast, les mailler, les dessiner dans le repère du corps. Partagée par le tracé de la passe et par les zones vertes, pour qu'ils ne puissent pas dessiner le même sol différemment. La sonde part de la hauteur **analytique du point mesuré**, pas d'une altitude unique pour la feuille : une feuille couvre un quad entier, sur lequel le relief dépasse la portée du rayon |
 | `Src/parallax/CleanedZonesOverlay.cs` | **Les zones déjà nettoyées, en vert** (case à cocher de la fenêtre de debug). Lit les **masques vivants**, jamais les actions enregistrées : c'est là qu'est la valeur de debug — une action écartée à l'injection ou un quad pris par un autre mod se voient comme un **trou dans le vert**. Une feuille par quad, construite une fois puis gardée (une zone ne bouge pas), un seul quad maillé par frame |
 | `Src/parallax/OverlayMaterial.cs` | Le matériau des deux aperçus, et **le seul endroit** où vit la liste de shaders : un shader de KSP transforme un calque en artefact d'espace écran (§5), et `Shader.Find` échoue en silence |
 | `Src/terrain/BladeStance.cs` | Comment la lame est posée : hauteur du **tranchant** au-dessus du sol et angle de son axe **haut** avec la **normale du sol**, en un raycast. Mesuré contre le sol et non contre l'horizon — sur une pente, une lame bien posée suit la pente |
-| `Src/terrain/SurfaceBand.cs` | La bande d'une passe : origine, direction, longueur, largeur — **tout en directions unitaires du repère du corps**, jamais de lat/lon. Porte `WidthStep` (= une case), le pas et le minimum des deux curseurs |
+| `Src/terrain/SurfaceBand.cs` | La bande d'une passe : origine (le tranchant de la lame), direction, longueur, largeur — **tout en directions unitaires du repère du corps**, jamais de lat/lon. Porte `WidthStep` (= une case), le pas et le minimum des deux curseurs |
 | `Src/terrain/MaskProjection.cs` | **Le repère d'un masque**, et rien d'autre : direction du sol ⇄ pixel, dans l'expression exacte du compute shader. Séparé de `BandRaster` parce que deux choses en ont besoin — une bande qu'on **prévoit**, et un masque qui **existe déjà** et qu'on relit |
 | `Src/terrain/BandRaster.cs` | **Le cœur de la pixelisation** : la bande projetée dans le repère d'UN masque, la règle « toute case touchée », et l'échantillonnage bilinéaire + seuil `< 0.5` du shader. Une seule implémentation, utilisée par le tracé **et** par le highlight — deux versions feraient mentir l'aperçu |
 | `Src/terrain/QuadLocator.cs` | Géométrie des quads : arête, demi-diagonale, et **quels quads-feuilles une passe touche** (en vol uniquement) : pré-sélection par calotte contenant la bande, puis test **exact** « au moins une case effacée » |
@@ -332,7 +338,7 @@ Ouvert avec **MOD+B** en vol (MOD = shift droit sous Windows). Il liste les **4 
 - quatre distances égales ⇒ il est sur le **coin** où quatre quads se rejoignent ;
 - la ligne `spread` donne directement l'écart entre la plus petite et la plus grande — la faire tendre vers 0 revient à se placer au coin.
 
-La dernière ligne annonce combien de quads la **passe réglée dans le PAW** toucherait à cet endroit : c'est le nombre de decals qui seraient créés, donc la valeur à surveiller pour tester une passe à cheval.
+La dernière ligne annonce combien de quads la passe de la **lame en aperçu** toucherait à cet endroit : c'est le nombre de decals qui seraient créés, donc la valeur à surveiller pour tester une passe à cheval. Sans aperçu actif, il n'y a pas de passe à décrire et la ligne le dit — allumer la prévisualisation d'une lame.
 
 **Supprimés** : `BulldozerFlattenMod` (le PQSMod de nivellement), `TerrainLeveler`, `BulldozerPlugin` (bouton toolbar, remplacé par le PAW) et `BulldozerDiagnosticPlugin` (dump d'altitudes mesh vs analytique, sans objet maintenant).
 
@@ -363,7 +369,7 @@ Sont donc **acquis, en jeu et non plus seulement par lecture de source** : l'exc
 
 Dump `BandDiagnostic` en main, rover immobile, `maxLevel=9`, quads 728 × 754 m, 4 masques de 231 px à 4,99 m/px :
 
-- `origin check: lat/lon vs world position differ by **0,11 m**` → l'origine de la bande est bien sous le rover, malgré l'aller-retour lat/lon ;
+- `origin check: lat/lon vs world position differ by **0,11 m**` → l'origine de la bande est bien sous le rover, malgré l'aller-retour lat/lon (⚠️ **cette ligne a changé de référence le 2026-08-31** : la passe partant désormais du **tranchant de la lame**, le dump compare au tranchant et non plus au centre du vaisseau, et affiche l'écart des deux sur une ligne à part — un `origin check` à 0 et un déport de quelques mètres sont donc le résultat **attendu**, pas une régression) ;
 - `quad center -> px=(115.0,115.0) expected (115.0,115.0)` sur **les 4 quads** → le repère du masque (footprint, taille, `rot`) est reproduit exactement ;
 - la table d'instances suit la géométrie au demi-mètre : `perp=0.2 → BLOCKED`, `perp=-1.4 → BLOCKED`, `perp=28.0 → kept` ;
 - les cas limites **confirment en jeu** le modèle mesuré hors du jeu : `perp=5.9 → mask=0.31 BLOCKED` mais `perp=5.7 → mask=0.55 kept`, soit un couloir effectif qui atteint ~±6 m par endroits.
@@ -580,6 +586,31 @@ Le quota est un état de **pièce** (`cellsLeft`, `isPersistant` sur le PartModu
 
 **Ce que le joueur voit** : le coût de la passe réglée s'affiche en direct dans le PAW (rafraîchi 2×/s tant que la fenêtre est ouverte), à côté de l'usure restante. Coût > restant → refus chiffré, **sans rechargement** ; coût nul (tout est déjà propre) → refus aussi, pour la même raison : le rechargement est la partie chère d'une passe, pas la lame.
 
+### Plusieurs lames sur un même vaisseau (2026-08-31)
+
+Rien ne l'interdit, ni deux lames boulonnées sur un rover, ni deux rovers dockés qui en portent une chacun. **Chaque lame vise et s'use pour elle-même**, et c'est ce qui rend le montage lisible plutôt qu'ambigu :
+
+| Ce qui décide | Porté par |
+|---|---|
+| longueur, largeur, usure restante | la pièce (`isPersistant`) |
+| hauteur au sol, inclinaison (les deux refus) | la pièce |
+| **origine et direction de la passe** | **la pièce** |
+| l'aperçu — **une seule lame à la fois** | `ScatterHighlighter.Source` |
+
+Deux PAW peuvent donc être épinglés côte à côte avec des réglages, des coûts, des usures et des poses **indépendants**. Chaque fenêtre ouverte recalcule son coût 2×/s, et ce calcul parcourt le registre de quads de Parallax : deux fenêtres, deux fois le travail.
+
+**L'aperçu, lui, est exclusif** — et c'est un arbitrage de coût, pas d'ergonomie : une prévisualisation parcourt le registre de quads, rasterise la bande dans chaque quad touché et teste **chaque instance chargée** contre le masque obtenu, à chaque frame. L'allumer sur une lame l'éteint donc sur les autres, dont le PAW **redérive son propre libellé** de `ScatterHighlighter.Source` (test hors de la garde « PAW ouvert », pour que le libellé soit juste dès la frame où la fenêtre s'ouvre).
+
+⚠️ **`Source` est aussi la visée des calques** : la lame en aperçu est celle qu'ils suivent, avec **ses** longueur et largeur. C'est la seule notion — il n'y a plus de « dernière lame touchée », plus de `SelectedLength`/`SelectedWidth`, et plus de surcharge `TryBuildBand(Vessel, …)` : **une bande se construit toujours depuis une lame**. Conséquences à connaître : un aperçu lancé depuis le PAW d'un rover **voisin** montre bien la passe de ce rover-là ; `QuadOverlay` n'a plus rien à annoncer sans aperçu actif (il le dit) ; et l'aperçu **s'éteint au changement de scène**, une lame ne survivant pas à un rechargement — donc après une passe, il faut le rallumer.
+
+*C'était un vrai bug jusqu'au 2026-08-31* : la direction venait de `Selected` alors que tout le reste venait de la pièce. Une lame avant et une lame arrière, un clic sur celle de devant sans toucher aux curseurs, et la bande partait **à 180°**. Le facteur aggravant : on validait la pose de la lame A (bien posée) pour viser avec la lame B (levée), donc les deux règles de refus devenaient contournables. Corollaire moins visible : après un **undocking**, `Selected` partait avec l'autre moitié et la visée retombait silencieusement sur le point de contrôle.
+
+**Le vaisseau de la lame, jamais l'actif.** Un PAW s'ouvre sur une pièce d'un vaisseau voisin non contrôlé : le coût et la bande se calculent donc sur `part.vessel`. Seul le `focusIdx` du rechargement reste sur `FlightGlobals.ActiveVessel` — nettoyer depuis le PAW du voisin ne doit pas rendre la main sur un autre rover.
+
+**Côté gameplay, rien à durcir.** Poser une seconde lame, c'est **acheter de la capacité en payant de la masse** — le geste le plus banal de KSP (deux batteries, deux réservoirs). Le barème `kg/case` décroissant fait que l'empilement reste *possible mais moins bon* que la montée en gamme : 2 × BD-2 = 3 t pour 400 cases contre 3,5 t pour 600 sur une BD-3. Les quotas ne sont **pas mutualisés** (une passe à 250 cases est refusée sur une BD-2 même s'il y en a deux à bord — il faut la couper en deux) : « ma lame est usée » reste une propriété de la lame, pas un réservoir de vaisseau.
+
+Le seul montage sans récompense est **deux lames côte à côte** : la largeur du modèle ne plafonnant pas la largeur de passe, elles ne couvrent pas plus large. C'est assumé (un bulldozer fait des allers-retours), mais le joueur peut s'y attendre.
+
 **Les lames collisionnent** (décision du 2026-08-31, `disableCollisions` **supprimé**) : une lame est modélisée au ras du sol, donc telle quelle elle laboure le terrain et cloue le rover sur place. **C'est le but** — le joueur doit la porter sur un **axe robotisé**, la lever pour rouler et la descendre pour travailler. Le mod n'a techniquement besoin d'aucun contact (le nettoyage se décide dans un masque) : la contrainte est de gameplay, et les deux règles de refus « lame trop haute / mal alignée » (§2) sont ce qui la rend obligatoire plutôt que décorative.
 
 ⚠️ **La version précédente passait les colliders en TRIGGER en vol** (jamais désactivés — un collider désactivé est invisible au `Physics.RaycastAll` de `Mouse.CheckHoveredPart`, et **la pièce perd tout son PAW** ; un trigger, lui, reste cliquable parce que le `queriesHitTriggers` d'Unity vaut `true` par défaut et que KSP ne le change jamais). À ressortir de git si l'on revient un jour sur la décision — mais alors il faut ressortir aussi le fait qu'une lame sans contact rend les deux seuils ci-dessus purement déclaratifs.
@@ -588,7 +619,7 @@ Le quota est un état de **pièce** (`cellsLeft`, `isPersistant` sur le PartModu
 
 À savoir au passage : ni l'un ni l'autre état ne sort la lame du calcul de `Vessel.getLowestPoint()`, qui **réactive lui-même tous les colliders** le temps de sa mesure avant de restaurer leur état.
 
-**Modèles : générés, plus empruntés au stock.** Vus en jeu le 2026-08-30 : les trois pièces se compilent, se posent, et le rendu convient. ⚠️ **Le cap n'est pas encore validé** — c'est le premier essai où il vient de `bladeFace` et non du point de contrôle.
+**Modèles : générés, plus empruntés au stock.** Vus en jeu le 2026-08-30 : les trois pièces se compilent, se posent, et le rendu convient. ⚠️ **Ni le cap ni l'origine ne sont encore validés en jeu** — c'est le premier essai où le cap vient de `bladeFace` et non du point de contrôle, et (depuis le 2026-08-31) où la passe part du **tranchant** et non du centre du vaisseau. `BandDiagnostic` mesure les deux : `blade facing` contre le navball, `origin check` contre le tranchant.
 
 Deux défauts trouvés à l'écran, tous deux corrigés — et tous deux dans les **raccords** entre solides, jamais dans la forme elle-même. Les deux règles générales sont dans le [CLAUDE.md parent](../CLAUDE.md), piège « deux solides qui se RECOUVRENT clignotent ».
 

@@ -39,12 +39,14 @@ namespace com.github.lhervier.ksp.bulldozermod.diagnostics
         // Instances are listed, not summarised, so a table has to stay readable in the log.
         private const int MaxListed = 60;
 
-        /// <summary>Dumps the pass that would be applied right now. Never modifies anything.</summary>
-        public static void Dump(Vessel vessel, double length, double width)
+        /// <summary>Dumps the pass <paramref name="blade"/> would apply right now. Never modifies
+        /// anything.</summary>
+        public static void Dump(BulldozerCleanModule blade, double length, double width)
         {
             StringBuilder sb = new StringBuilder();
             sb.AppendLine("=== BULLDOZER PASS DUMP ===");
 
+            Vessel vessel = blade == null ? null : blade.vessel;
             if (vessel == null || vessel.mainBody == null || vessel.mainBody.pqsController == null)
             {
                 LOGGER.LogWarning("No vessel / body / PQS — nothing to dump");
@@ -54,19 +56,16 @@ namespace com.github.lhervier.ksp.bulldozermod.diagnostics
             PQS sphere = body.pqsController;
 
             SurfaceBand band;
-            if (!BulldozerCleanModule.TryBuildBand(vessel, length, width, out band))
+            if (!BulldozerCleanModule.TryBuildBand(blade, length, width, out band))
             {
-                sb.AppendLine("TryBuildBand REFUSED: the control point gives no usable heading.");
-                sb.AppendLine("  reference.up (world) = " +
-                              (vessel.ReferenceTransform == null
-                                  ? "no reference transform at all"
-                                  : vessel.ReferenceTransform.up.ToString()));
+                sb.AppendLine("TryBuildBand REFUSED: the blade aims nowhere usable.");
+                sb.AppendLine("  facing axis (world) = " + blade.FacingAxis);
                 LOGGER.LogInfo(sb.ToString());
                 return;
             }
 
-            DumpBand(sb, vessel, body, sphere, band);
-            DumpHeadings(sb, vessel, body, band);
+            DumpBand(sb, blade, vessel, body, sphere, band);
+            DumpHeadings(sb, blade, vessel, body, band);
             DumpQuads(sb, body, band);
             DumpInstances(sb, body, band);
             DumpFamilies(sb, body);
@@ -74,8 +73,8 @@ namespace com.github.lhervier.ksp.bulldozermod.diagnostics
             LOGGER.LogInfo(sb.ToString());
         }
 
-        private static void DumpBand(StringBuilder sb, Vessel vessel, CelestialBody body, PQS sphere,
-                                     SurfaceBand band)
+        private static void DumpBand(StringBuilder sb, BulldozerCleanModule blade, Vessel vessel,
+                                     CelestialBody body, PQS sphere, SurfaceBand band)
         {
             sb.AppendLine($"body={body.name} R={body.Radius:F0} maxLevel={sphere.maxLevel} " +
                           $"cell={ScatterMask.MetersPerPixel:F1} m");
@@ -85,25 +84,33 @@ namespace com.github.lhervier.ksp.bulldozermod.diagnostics
 
             // The origin is rebuilt from lat/lon while everything else comes from world positions. If those
             // two roads ever diverged, the whole pass would sit somewhere else — so they are compared here.
-            Vector3d fromWorld = body.GetRelSurfacePosition(vessel.GetWorldPos3D()).normalized;
+            // Against the BLADE'S EDGE, which is where a pass starts: measured against the vessel centre,
+            // this would now report the mounting offset as an error.
+            Vector3d fromWorld = body.GetRelSurfacePosition(blade.OriginPoint).normalized;
             double originError = MathUtils.AngleBetween(band.origin, fromWorld) * body.Radius;
-            sb.AppendLine($"origin check: lat/lon vs world position differ by {originError:F2} m " +
+            sb.AppendLine($"origin check: lat/lon vs blade edge differ by {originError:F2} m " +
                           "(must be ~0; anything large means a frame mismatch)");
 
-            Vector3d noseWorld = vessel.ReferenceTransform.up;
-            sb.AppendLine($"navball nose (world)={noseWorld} -> forward (body frame)={band.forward}");
+            // How far from the middle of the rover that edge sits. Not an error — it is the whole point of
+            // aiming from the blade — but it is what tells two blades' passes apart.
+            Vector3d centre = body.GetRelSurfacePosition(vessel.GetWorldPos3D()).normalized;
+            double offset = MathUtils.AngleBetween(fromWorld, centre) * body.Radius;
+            sb.AppendLine($"blade edge is {offset:F1} m from the vessel centre (expected: a mounting offset)");
+
+            sb.AppendLine($"blade facing (world)={blade.FacingAxis} -> forward (body frame)={band.forward}");
         }
 
         /// <summary>
         /// Bearings of every axis that could plausibly mean "forward", so the one that matches reality can be
         /// identified rather than assumed.
         ///
-        /// Two independent references to compare them against: the NAVBALL on screen (which reads the same
-        /// axis the band uses, so a disagreement there means the control point is not aligned with the
-        /// chassis), and the SURFACE VELOCITY while driving — the only unarguable answer to "where does this
-        /// rover actually go".
+        /// Two independent references to compare them against: the NAVBALL on screen (which reads the
+        /// control point, so a disagreement with the blade's own axis means the blade is not mounted square
+        /// with the chassis), and the SURFACE VELOCITY while driving — the only unarguable answer to "where
+        /// does this rover actually go".
         /// </summary>
-        private static void DumpHeadings(StringBuilder sb, Vessel vessel, CelestialBody body, SurfaceBand band)
+        private static void DumpHeadings(StringBuilder sb, BulldozerCleanModule blade, Vessel vessel,
+                                         CelestialBody body, SurfaceBand band)
         {
             // North and east in the body frame, built analytically from lat/lon. This frame is
             // SphericalVector(lat, lon).xzy, so axis 1 is the pole: north is d/dlat, east is d/dlon.
@@ -115,11 +122,14 @@ namespace com.github.lhervier.ksp.bulldozermod.diagnostics
 
             sb.AppendLine("headings (deg, 0=north, 90=east — compare the first line with the NAVBALL):");
             sb.AppendLine("    " + Bearing("band forward", band.forward, band.origin, north, east));
+            sb.AppendLine("    " + Bearing("blade facing (what the band uses)",
+                                           body.GetRelSurfaceDirection(blade.FacingAxis), band.origin,
+                                           north, east));
 
             Transform reference = vessel.ReferenceTransform;
             if (reference != null)
             {
-                sb.AppendLine("    " + Bearing("control point .up (what the band uses)",
+                sb.AppendLine("    " + Bearing("control point .up (the band's fallback axis)",
                                                body.GetRelSurfaceDirection(reference.up), band.origin, north, east));
                 sb.AppendLine("    " + Bearing("control point .forward",
                                                body.GetRelSurfaceDirection(reference.forward), band.origin, north, east));
