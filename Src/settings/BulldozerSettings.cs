@@ -25,6 +25,9 @@ namespace com.github.lhervier.ksp.bulldozermod.settings
         /// <summary>Whether the debug overlay paints the already-cleared cells on the ground.</summary>
         public bool ShowCleanedZones { get; set; }
 
+        /// <summary>Whether the blades offer their log-only diagnostic entry in the PAW.</summary>
+        public bool ShowDumpButton { get; set; }
+
         public BulldozerSettings()
         {
             string dll = Assembly.GetExecutingAssembly().Location;
@@ -36,6 +39,9 @@ namespace com.github.lhervier.ksp.bulldozermod.settings
         {
             // Off by default: it is a debug view, and it costs a raycast per cell corner to build.
             ShowCleanedZones = false;
+
+            // Off by default: it is a test tool, and it sits in the PAW of every blade.
+            ShowDumpButton = false;
         }
 
         /// <summary>Reads the settings file, falling back on the defaults when it is missing or unreadable.</summary>
@@ -60,7 +66,12 @@ namespace com.github.lhervier.ksp.bulldozermod.settings
             general.TryGetValue("showCleanedZones", ref showCleanedZones);
             ShowCleanedZones = showCleanedZones;
 
-            LOGGER.LogInfo($"Settings loaded from {_path} (showCleanedZones={ShowCleanedZones})");
+            bool showDumpButton = ShowDumpButton;
+            general.TryGetValue("showDumpButton", ref showDumpButton);
+            ShowDumpButton = showDumpButton;
+
+            LOGGER.LogInfo($"Settings loaded from {_path} (showCleanedZones={ShowCleanedZones}, " +
+                           $"showDumpButton={ShowDumpButton})");
         }
 
         /// <summary>Writes the settings file, creating PluginData/ on first save.</summary>
@@ -71,6 +82,7 @@ namespace com.github.lhervier.ksp.bulldozermod.settings
                 ConfigNode root = new ConfigNode();
                 ConfigNode general = root.AddNode(GeneralNode);
                 general.AddValue("showCleanedZones", ShowCleanedZones);
+                general.AddValue("showDumpButton", ShowDumpButton);
 
                 Directory.CreateDirectory(Path.GetDirectoryName(_path));
                 root.Save(_path);

@@ -39,6 +39,16 @@ namespace com.github.lhervier.ksp.bulldozermod.diagnostics
         // Instances are listed, not summarised, so a table has to stay readable in the log.
         private const int MaxListed = 60;
 
+        /// <summary>
+        /// Whether the blades show their "dump this pass" entry in the PAW. Off until the debug window says
+        /// otherwise, so a normal game never sees it.
+        ///
+        /// Static, and for the same reason the overlay's switch is: the setting outlives a scene while the
+        /// blades reading it are rebuilt at every load, so the flag cannot live on either side. The debug
+        /// window's view model owns the pairing with the stored preference.
+        /// </summary>
+        public static bool ButtonVisible;
+
         /// <summary>Dumps the pass <paramref name="blade"/> would apply right now. Never modifies
         /// anything.</summary>
         public static void Dump(BulldozerCleanModule blade, double length, double width)

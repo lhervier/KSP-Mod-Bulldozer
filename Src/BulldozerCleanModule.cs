@@ -240,8 +240,11 @@ namespace com.github.lhervier.ksp.bulldozermod
         ///
         /// Test tool: it is what separates "the mask is in the wrong place" from "the blade is 5 m wide and
         /// those rocks are clusters anchored elsewhere". To be removed with the rest of Src/diagnostics.
+        ///
+        /// Hidden unless the debug window asks for it: it is an unlovely entry to leave in the PAW of every
+        /// blade of a normal game.
         /// </summary>
-        [KSPEvent(guiActive = true, guiActiveEditor = false, active = true,
+        [KSPEvent(guiActive = false, guiActiveEditor = false, active = true,
                   guiName = "#LOC_BulldozerMod_dumpPass")]
         public void DumpPass()
         {
@@ -320,6 +323,8 @@ namespace com.github.lhervier.ksp.bulldozermod
             // Derived, never assumed off: this blade may be the one already being previewed — a docking
             // brings in parts without a scene change.
             SyncHighlightLabel();
+
+            SyncDumpButton();
         }
 
         public override void OnUpdate()
@@ -337,6 +342,13 @@ namespace com.github.lhervier.ksp.bulldozermod
             if (_highlightLabelOn != (ScatterHighlighter.Source == this))
             {
                 SyncHighlightLabel();
+            }
+
+            // Same reason, and same place: the debug window can be toggled while this PAW is open, and the
+            // window itself is what the player is looking at when they do it.
+            if (Events["DumpPass"].guiActive != BandDiagnostic.ButtonVisible)
+            {
+                SyncDumpButton();
             }
 
             // Everything from here is for a PAW somebody is reading: the cost alone walks Parallax's whole
@@ -457,6 +469,13 @@ namespace com.github.lhervier.ksp.bulldozermod
             _highlightLabelOn = ScatterHighlighter.Source == this;
             Events["ToggleHighlight"].guiName =
                 ModLocalization.GetString(_highlightLabelOn ? "highlightOff" : "highlightOn");
+        }
+
+        // Nothing else to do to refresh an open window: KSP re-walks its items every update and drops the
+        // ones whose event has gone guiActive = false, adding them back when it comes back.
+        private void SyncDumpButton()
+        {
+            Events["DumpPass"].guiActive = BandDiagnostic.ButtonVisible;
         }
 
         // Wear left, and whether the blade can still be used at all.

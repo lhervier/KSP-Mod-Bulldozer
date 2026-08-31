@@ -1,4 +1,5 @@
 using UnityEngine;
+using com.github.lhervier.ksp.bulldozermod.diagnostics;
 using com.github.lhervier.ksp.bulldozermod.parallax;
 using com.github.lhervier.ksp.bulldozermod.settings;
 
@@ -20,11 +21,16 @@ namespace com.github.lhervier.ksp.bulldozermod.ui
         public readonly EventVoid OnShowCleanedZonesChanged =
             new EventVoid("BulldozerDebugViewModel.OnShowCleanedZonesChanged");
 
+        /// <summary>Fired whenever <see cref="ShowDumpButton"/> changes.</summary>
+        public readonly EventVoid OnShowDumpButtonChanged =
+            new EventVoid("BulldozerDebugViewModel.OnShowDumpButtonChanged");
+
         /// <summary>Binds the view model to the settings and applies them. Call once, right after AddComponent.</summary>
         public BulldozerDebugViewModel WithSettings(BulldozerSettings settings)
         {
             _settings = settings;
             CleanedZonesOverlay.Active = settings.ShowCleanedZones;
+            BandDiagnostic.ButtonVisible = settings.ShowDumpButton;
             return this;
         }
 
@@ -42,6 +48,23 @@ namespace com.github.lhervier.ksp.bulldozermod.ui
                 _settings.Save();
                 CleanedZonesOverlay.Active = value;
                 OnShowCleanedZonesChanged.Fire();
+            }
+        }
+
+        /// <summary>Whether the blades offer their log-only diagnostic entry in the PAW.</summary>
+        public bool ShowDumpButton
+        {
+            get { return _settings != null && _settings.ShowDumpButton; }
+            set
+            {
+                if (_settings == null || _settings.ShowDumpButton == value)
+                {
+                    return;
+                }
+                _settings.ShowDumpButton = value;
+                _settings.Save();
+                BandDiagnostic.ButtonVisible = value;
+                OnShowDumpButtonChanged.Fire();
             }
         }
     }

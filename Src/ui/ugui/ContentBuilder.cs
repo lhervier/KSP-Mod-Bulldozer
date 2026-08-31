@@ -45,10 +45,17 @@ namespace com.github.lhervier.ksp.bulldozermod.ui.ugui
                 .Build();
             cleanedZonesCheckbox.transform.SetParent(rootGo.transform, false);
 
+            CheckboxController dumpButtonCheckbox = new CheckboxBuilder()
+                .WithLabel(ModLocalization.GetString("debugShowDumpButton"))
+                .WithGreedyState(true)
+                .WithCheckedState(_viewModel.ShowDumpButton)
+                .Build();
+            dumpButtonCheckbox.transform.SetParent(rootGo.transform, false);
+
             return rootGo
                 .AddComponent<ContentController>()
                 .WithViewModel(_viewModel)
-                .WithControls(cleanedZonesCheckbox);
+                .WithControls(cleanedZonesCheckbox, dumpButtonCheckbox);
         }
     }
 }
