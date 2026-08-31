@@ -93,22 +93,37 @@ namespace com.github.lhervier.ksp.bulldozermod.terrain
             return new Vector2((float)(u * _size), (float)(v * _size));
         }
 
-        /// <summary>
-        /// Surface direction of a cell's center — the inverse of <see cref="PixelOf"/>.
-        ///
-        /// The projection Parallax uses is orthographic onto the decal's tangent plane, so it inverts by
-        /// putting the point back on the unit sphere and undoing the decal's rotation. Cells outside the
-        /// inscribed disk have no direction at all; they are pinned to the horizon rather than refused,
-        /// which is harmless because the strip never reaches that far into a mask sized on its own quad.
-        ///
-        /// Carried through float, like <see cref="PixelOf"/> itself: that is ~6 cm on the Mun, two orders
-        /// below the 5 m cell this locates.
-        /// </summary>
+        /// <summary>Surface direction of a cell's center — the inverse of <see cref="PixelOf"/>.</summary>
         public Vector3d DirectionOf(int x, int y)
         {
+            return DirectionAt(x + 0.5, y + 0.5);
+        }
+
+        /// <summary>
+        /// Surface direction of a cell's lower-left CORNER — <see cref="DirectionOf"/> taken at the cell's
+        /// edge rather than its middle, so cell (x, y) is bounded by the corners (x, y) to (x+1, y+1).
+        ///
+        /// Only a drawn outline of the cells needs this; the mask itself only ever asks about centers.
+        /// </summary>
+        public Vector3d CornerDirection(int x, int y)
+        {
+            return DirectionAt(x, y);
+        }
+
+        // Inverse of PixelOf at an arbitrary point of the pixel grid.
+        //
+        // The projection Parallax uses is orthographic onto the decal's tangent plane, so it inverts by
+        // putting the point back on the unit sphere and undoing the decal's rotation. Points outside the
+        // inscribed disk have no direction at all; they are pinned to the horizon rather than refused,
+        // which is harmless because the strip never reaches that far into a mask sized on its own quad.
+        //
+        // Carried through float, like PixelOf itself: that is ~6 cm on the Mun, two orders below the 5 m
+        // cell this locates.
+        private Vector3d DirectionAt(double px, double py)
+        {
             double scale = _decalRadius / _bodyRadius;
-            double localX = ((x + 0.5) * 2.0 / _size - 1.0) * scale;
-            double localZ = ((y + 0.5) * 2.0 / _size - 1.0) * scale;
+            double localX = (px * 2.0 / _size - 1.0) * scale;
+            double localZ = (py * 2.0 / _size - 1.0) * scale;
             double squared = 1.0 - localX * localX - localZ * localZ;
             double localY = squared > 0.0 ? Math.Sqrt(squared) : 0.0;
 

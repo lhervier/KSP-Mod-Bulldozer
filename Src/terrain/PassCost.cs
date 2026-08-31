@@ -97,7 +97,9 @@ namespace com.github.lhervier.ksp.bulldozermod.terrain
                     {
                         continue;
                     }
-                    if (!Inside(quad.edgePlanes, raster.DirectionOf(x, y)))
+                    // Charged to the quad that OWNS this cell, and to no other: over-charging is a
+                    // slightly shorter blade life, under-charging is free terraforming.
+                    if (!QuadLocator.Contains(quad.edgePlanes, raster.DirectionOf(x, y)))
                     {
                         continue;
                     }
@@ -105,26 +107,6 @@ namespace com.github.lhervier.ksp.bulldozermod.terrain
                 }
             }
             return count;
-        }
-
-        // Whether a direction falls inside the quad, i.e. on the inward side of all four of its edge planes.
-        //
-        // A quad with no shape captured is charged rather than given away: over-charging is a slightly
-        // shorter blade life, under-charging is free terraforming.
-        private static bool Inside(Vector3d[] planes, Vector3d direction)
-        {
-            if (planes == null || planes.Length < 4)
-            {
-                return true;
-            }
-            for (int i = 0; i < 4; i++)
-            {
-                if (Vector3d.Dot(direction, planes[i]) < 0.0)
-                {
-                    return false;
-                }
-            }
-            return true;
         }
     }
 }

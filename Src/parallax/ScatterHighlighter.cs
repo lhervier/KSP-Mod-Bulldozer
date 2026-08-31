@@ -45,26 +45,6 @@ namespace com.github.lhervier.ksp.bulldozermod.parallax
         /// </summary>
         public static bool Active;
 
-        // Tried in order, first hit wins. Which shaders a KSP install actually keeps is not guaranteed, so
-        // the resolved name is logged: it is the first thing to check if nothing shows up. On a stock 1.12
-        // install "Particles/Alpha Blended" is NOT there and falls through to the legacy one.
-        //
-        // "KSP/Alpha/Unlit Transparent" is DELIBERATELY ABSENT and must not be put back: drawing the overlay
-        // with it leaves black patches on the rocks that survive into the following frames as silhouettes
-        // frozen in screen space. Every other candidate here was tried in flight at the same spot, none
-        // shows it. See CLAUDE.md.
-        //
-        // Only the first two are translucent, which is what the overlay wants; the last three hide the rock
-        // under a flat red and are a last resort - a coarse overlay still beats none.
-        private static readonly string[] ShaderCandidates =
-        {
-            "Legacy Shaders/Transparent/Diffuse",
-            "Particles/Alpha Blended",
-            "KSP/Unlit",
-            "Unlit/Color",
-            "Diffuse"
-        };
-
         // Local Scenery. The scatters carry no renderer of their own, so there is no layer to inherit; this
         // one is drawn by the flight camera and is where the terrain lives.
         private const int DrawLayer = 15;
@@ -83,6 +63,11 @@ namespace com.github.lhervier.ksp.bulldozermod.parallax
 
         // Static, and never destroyed: see HighlightMaterial().
         private static Material _material;
+
+        // The other half of the preview: the strip itself, painted on the ground. Owned here rather
+        // than run as an addon of its own so both halves share one switch, one camera and one set of
+        // scene guards - and so the trace is drawn from the very band the highlight is aiming with.
+        private readonly BandTrace _trace = new BandTrace();
 
 
         // The activation summary is logged on the first frame that actually finds something: on the very
@@ -106,6 +91,7 @@ namespace com.github.lhervier.ksp.bulldozermod.parallax
                 _warnedNoRegistry = false;
                 _lastShown = -1;
                 _lastTotal = -1;
+                _trace.Dispose();
                 return;
             }
 
@@ -122,28 +108,6 @@ namespace com.github.lhervier.ksp.bulldozermod.parallax
 
             Vessel vessel = FlightGlobals.ActiveVessel;
             if (vessel == null || vessel.mainBody == null || vessel.packed)
-            {
-                return;
-            }
-
-            // Every collideable instance of every loaded quad — NOT CollisionManager.activeObjects, which
-            // only holds the handful Parallax has actually built a collider for. Those appear only when the
-            // vessel's bounding sphere is about to touch the rock's own (ProcessColliderJob, in essence
-            // `|d|² - vesselBounds - sqrMeshSize - lookahead² < 0`), which reaches a few meters for a small
-            // rock and a few tens for a big cluster — far too short, and far too uneven, to preview a zone.
-            FastList<ScatterColliderData> collision = Parallax.CollisionManager.collisionData;
-            if (collision == null)
-            {
-                if (!_warnedNoRegistry)
-                {
-                    LOGGER.LogWarning("Parallax exposes no collider data on this body — nothing to highlight");
-                    _warnedNoRegistry = true;
-                }
-                return;
-            }
-
-            Material material = HighlightMaterial();
-            if (material == null)
             {
                 return;
             }
@@ -166,6 +130,33 @@ namespace com.github.lhervier.ksp.bulldozermod.parallax
             SurfaceBand band;
             if (!BulldozerCleanModule.TryBuildBand(vessel, BulldozerCleanModule.SelectedLength,
                                                   BulldozerCleanModule.SelectedWidth, out band))
+            {
+                return;
+            }
+
+            // The strip on the ground, drawn before anything else because it does not need
+            // Parallax to have loaded a single rock: it is what shows the far end of a long
+            // pass, where there is nothing to highlight either way.
+            _trace.Draw(body, band, camera);
+
+            // Every collideable instance of every loaded quad — NOT CollisionManager.activeObjects, which
+            // only holds the handful Parallax has actually built a collider for. Those appear only when the
+            // vessel's bounding sphere is about to touch the rock's own (ProcessColliderJob, in essence
+            // `|d|² - vesselBounds - sqrMeshSize - lookahead² < 0`), which reaches a few meters for a small
+            // rock and a few tens for a big cluster — far too short, and far too uneven, to preview a zone.
+            FastList<ScatterColliderData> collision = Parallax.CollisionManager.collisionData;
+            if (collision == null)
+            {
+                if (!_warnedNoRegistry)
+                {
+                    LOGGER.LogWarning("Parallax exposes no collider data on this body — nothing to highlight");
+                    _warnedNoRegistry = true;
+                }
+                return;
+            }
+
+            Material material = HighlightMaterial();
+            if (material == null)
             {
                 return;
             }
@@ -317,6 +308,11 @@ namespace com.github.lhervier.ksp.bulldozermod.parallax
             _lastTotal = total;
         }
 
+        private void OnDestroy()
+        {
+            _trace.Dispose();
+        }
+
         // One breakdown per activation. It answers the two questions this overlay always raises: how much
         // Parallax has actually loaded around the vessel, and WHICH families it can never show — the
         // non-collideable ones are wiped by a clean just the same, they simply have no per-instance data.
@@ -394,9 +390,8 @@ namespace com.github.lhervier.ksp.bulldozermod.parallax
         /// <summary>
         /// The overlay's material, built once for the whole KSP session.
         ///
-        /// Static and flagged HideAndDontSave so it survives a scene change: KSP runs
-        /// Resources.UnloadUnusedAssets there, which would otherwise collect it, and rebuilding it per scene
-        /// bought nothing.
+        /// Static and never destroyed so it survives a scene change: KSP runs Resources.UnloadUnusedAssets
+        /// there, which would otherwise collect it, and rebuilding it per scene bought nothing.
         ///
         /// Destroying it per scene was TRIED as a fix for the ghost-shadow bug (see CLAUDE.md) and did NOT
         /// fix it. Kept on its own merits.
@@ -408,44 +403,13 @@ namespace com.github.lhervier.ksp.bulldozermod.parallax
                 return _material;
             }
 
-            for (int i = 0; i < ShaderCandidates.Length; i++)
+            _material = OverlayMaterial.Create(HighlightColor, "Rock highlight");
+            if (_material == null)
             {
-                Shader shader = Shader.Find(ShaderCandidates[i]);
-                if (shader == null)
-                {
-                    continue;
-                }
-
-                _material = new Material(shader);
-                _material.hideFlags = HideFlags.HideAndDontSave;
-
-                // Which of these a shader exposes depends on which one we landed on, so set whatever is there
-                // rather than assume. A textured shader with no texture would otherwise draw black.
-                if (_material.HasProperty("_Color"))
-                {
-                    _material.SetColor("_Color", HighlightColor);
-                }
-                if (_material.HasProperty("_TintColor"))
-                {
-                    _material.SetColor("_TintColor", HighlightColor);
-                }
-                if (_material.HasProperty("_MainTex"))
-                {
-                    _material.SetTexture("_MainTex", Texture2D.whiteTexture);
-                }
-                _material.renderQueue = 3100;
-
-                // Logged because the choice MATTERS beyond looks: one KSP shader turns this overlay into a
-                // screen-space artefact (see ShaderCandidates). Shader.Find returning null moves us down the
-                // list silently, so this line is the only way to know what is actually drawing.
-                LOGGER.LogInfo($"Highlight material using shader '{ShaderCandidates[i]}' "
-                               + $"(shader queue {shader.renderQueue})");
-                return _material;
+                // Nothing can be drawn at all, so stop pretending the overlay is on.
+                Active = false;
             }
-
-            LOGGER.LogError("No usable shader found for the highlight — turning it off");
-            Active = false;
-            return null;
+            return _material;
         }
     }
 }

@@ -203,6 +203,33 @@ namespace com.github.lhervier.ksp.bulldozermod.terrain
         }
 
         /// <summary>
+        /// Whether a surface direction falls inside a quad, i.e. on the inward side of all four of the
+        /// planes <see cref="TryGetEdgePlanes"/> produced for it.
+        ///
+        /// This is what tells which mask OWNS a patch of ground: a mask covers a footprint wider than its
+        /// own quad, so the very same ground is drawn into two to four of them, and anything counting or
+        /// drawing per cell has to attribute each cell to exactly one.
+        ///
+        /// A quad whose shape was never captured contains everything: callers are all better off
+        /// over-including than dropping ground on the floor.
+        /// </summary>
+        public static bool Contains(Vector3d[] planes, Vector3d direction)
+        {
+            if (planes == null || planes.Length < 4)
+            {
+                return true;
+            }
+            for (int i = 0; i < 4; i++)
+            {
+                if (Vector3d.Dot(direction, planes[i]) < 0.0)
+                {
+                    return false;
+                }
+            }
+            return true;
+        }
+
+        /// <summary>
         /// Half-diagonal (m) of a single quad — what sizes the mask covering it. Returns false when the quad
         /// has no usable matrix yet.
         ///
