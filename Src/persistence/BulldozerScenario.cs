@@ -7,7 +7,7 @@ namespace com.github.lhervier.ksp.bulldozermod.persistence
     /// <summary>
     /// Per-save store of cleaning actions (the single source of truth — never the in-memory body, which
     /// persists across saves via DontDestroyOnLoad). Added to ALL game modes so its OnLoad runs on every
-    /// save load, including saves that never carried the mod — that is what lets us purge decals leaked
+    /// flight load, including saves that never carried the mod — that is what lets us purge decals leaked
     /// from a previously loaded save.
     ///
     /// OnLoad is also where we INJECT the Parallax exclusion decals. This runs during the loading screen,
@@ -15,7 +15,18 @@ namespace com.github.lhervier.ksp.bulldozermod.persistence
     /// (vessel still packed), which is what the decals need: they register themselves per quad in
     /// OnQuadPreBuild, so they must be in the mod list before the sphere builds. See ScatterCleaner.
     /// </summary>
-    [KSPScenario(ScenarioCreationOptions.AddToAllGames, GameScenes.FLIGHT, GameScenes.SPACECENTER, GameScenes.TRACKSTATION)]
+    // FLIGHT ONLY — do NOT add a scene back without reading this first. OnLoad ends up calling
+    // PQS.ResetAndWait() on every touched body, and rebuilding Kerbin's sphere while the space center
+    // loads leaves KSC buildings that can no longer be clicked (measured on the Tracking Station and the
+    // R&D: a quad rebuild runs PQSCity.OnSphereReset, which deactivates the facility objects the click
+    // raycast needs). Reading the actions from another scene would need the injection moved out of
+    // OnLoad first, not this list extended.
+    //
+    // Nothing outside flight needs the decals anyway — they only decide which scatters spawn on the
+    // terrain the player is standing on — and the data survives a save made from another scene:
+    // ScenarioRunner only refreshes the protoModules whose moduleRef is live (ScenarioRunner.cs:416),
+    // the others keep the node they were loaded with.
+    [KSPScenario(ScenarioCreationOptions.AddToAllGames, GameScenes.FLIGHT)]
     public class BulldozerScenario : ScenarioModule
     {
         private static readonly ModLogger LOGGER = new ModLogger("Scenario");

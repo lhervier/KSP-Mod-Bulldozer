@@ -459,6 +459,43 @@ Le nom déclaré est **`Parallax`** — celui du `[KSPAssembly]` de Parallax, pa
 
 **Le nettoyage peut être partiel selon l'instant.** Un essai a laissé fleurs et herbes éparses ; le diagnostic montrait alors que le quad portant le vaisseau **n'était pas** pris en charge (le plus proche connu de Parallax était à 752 m, au-delà des 651 m possibles pour un quad de 920 m d'arête). Les scatters de ce quad avaient donc été générés sans notre masque. Rejoué au même endroit, le résultat était parfait. **Piste** : un quad ne s'enregistre qu'à sa construction (`isBuilt` n'est remis à `false` que dans `Awake()`), donc tout quad déjà bâti au moment de l'injection est perdu pour la passe. À surveiller si le cas se reproduit.
 
+### PIÈGE 4 — injecter hors du vol casse les bâtiments du KSC
+
+Constaté le 2026-08-31 : dans la vue du Centre spatial, **la station de suivi et la R&D ne sont plus cliquables**, alors que la piste et le SPH le restent. Désinstaller le mod le fait disparaître, le réinstaller le fait revenir.
+
+Ce n'est **ni le decal du KSC, ni la prévisu** — deux fausses pistes naturelles, écartées par la mesure :
+
+- **la prévisu est en vol uniquement** (`ScatterHighlighter`, `BandTrace`, `CleanedZonesOverlay` et la fenêtre de debug sont tous `KSPAddon.Startup.Flight`) : rien de tout ça n'existe au KSC ;
+- **nos decals Kerbin étaient à 15 et 22 km à l'ouest du KSC** (relevés dans `KSP.log` : `dir=[0.2416, 0.0009, -0.9703]` et `[0.2309, 0.0047, -0.9730]`, soit lon ≈ −76,0° et −76,65° contre −74,56° pour le KSC) — très au-delà de la portée de `ParallaxMaskKSC`. Aucune rencontre possible entre les deux ;
+- **aucune exception** dans le log pendant le chargement de la scène.
+
+La vraie cause est ailleurs, et le log la donne sans ambiguïté : `BulldozerScenario` est déclaré pour `FLIGHT | SPACECENTER | TRACKSTATION`, donc **son `OnLoad` injectait aussi au Centre spatial** — et l'injection se termine par `ResetAndWait()` sur **chaque corps touché, dont Kerbin**. On rebâtissait donc la sphère de Kerbin pendant le chargement du KSC :
+
+```
+16:24:26.057 [Scenario] Loaded 10 action(s)
+16:24:26.103 Update Quads Init: Kerbin          <- notre ResetAndWait
+16:24:29.656 [ScatterCleaner] Injected 6 decal(s) ...; reset 2 body(ies)
+16:24:30.160 [ApplicationLauncher] scene SPACECENTER
+```
+
+La corrélation est nette : avec **0 action**, `OnLoad` dure 4 ms et ne reset rien — et le bug ne se produit pas ; avec 10 actions, il dure **3,5 s** et reset Kerbin.
+
+Le mécanisme fin n'est pas prouvé, mais il n'a pas besoin de l'être pour trancher, et le sens de recherche est connu : un bâtiment du KSC se clique par `OnMouseOver` d'Unity (`SpaceCenterBuildingCollider`, qui appelle `SpaceCenterBuilding.ColliderHover`), donc par un **raycast physique où seul le collider le plus proche reçoit le message**. Tout ce qui se glisse devant vole le survol — et `PQSCity.OnSphereReset` commence par **désactiver tous ses enfants** (`SetActive(false)`, `transformsActive = false`), tandis que Parallax rejoue son chargement de corps (`[Scatter Manager] body loading Kerbin`) au milieu de la manœuvre. Que ce soient des colliders de scatters posés sur la pelouse ou des bâtiments qui ne se réactivent pas tous, la géométrie autour de la R&D et de la station de suivi n'est pas celle de la piste et du SPH — d'où des bâtiments touchés et d'autres non.
+
+**Correctif : le `[KSPScenario]` ne déclare plus que `GameScenes.FLIGHT`.** `ScenarioRunner` gate l'instanciation sur `targetScenes.Contains(HighLogic.LoadedScene)` (`ScenarioRunner.cs:321`) : pas de module, pas d'`OnLoad`, pas de reset. Ce n'est pas une optimisation de confort — hors du vol les decals ne décident de rien (ils ne servent qu'à filtrer les scatters du terrain sur lequel le joueur se tient), et on payait 3,5 s de chargement à chaque passage par le Centre spatial pour ça.
+
+**Ce que la liste des scènes ne coûte PAS** — vérifié avant de la réduire, parce que l'inquiétude est légitime :
+
+- **aucune perte de données en sauvant depuis le KSC.** `ScenarioRunner` ne reconstruit un `ProtoScenarioModule` que si son `moduleRef` est vivant (`ScenarioRunner.cs:416`) ; les autres recopient tels quels les `moduleValues` avec lesquels ils ont été chargés (`ProtoScenarioModule.Save`) ;
+- **rien ne lit le scénario hors vol** : les deux seuls usages de `BulldozerScenario.Instance` sont dans `BulldozerCleanModule`, sur le chemin d'une passe.
+
+⚠️ **Le piège est amorcé pour la prochaine fois**, et c'est pour ça que l'attribut porte un commentaire : le jour où on voudra lire les zones nettoyées depuis le KSC, le réflexe sera de rajouter `GameScenes.SPACECENTER` dans la liste — et le bug reviendra **avec**, silencieusement. La bonne réponse ce jour-là est de sortir l'injection d'`OnLoad`, pas de rallonger la liste.
+
+Conséquence assumée : un decal fuité d'une autre partie n'est plus purgé qu'à la prochaine entrée en vol. Sans importance — la fuite ne se voit que sur du terrain qu'on parcourt.
+
+⚠️ **La règle générale à retenir : ne jamais rebâtir un PQS dans une scène qui n'est pas celle du vol.** Le Centre spatial et la station de suivi sont posés sur le même PQS de Kerbin, avec des objets (`PQSCity`) qui ne s'attendent pas à voir leur sphère repartir de zéro sous eux.
+
+
 ### ✅ RÉSOLU le 2026-08-27 — ombres fantômes du surlignage : DEUX bugs, pas un
 
 Ouvert le 2026-08-25, fermé le 2026-08-27. Le dossier a longtemps piétiné parce qu'on cherchait **une** cause : il y en avait deux, indépendantes, dont une seule produisait le symptôme qui se voyait.
