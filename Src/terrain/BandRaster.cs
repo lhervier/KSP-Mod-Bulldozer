@@ -1,4 +1,3 @@
-using System;
 using UnityEngine;
 
 namespace com.github.lhervier.ksp.bulldozermod.terrain
@@ -29,11 +28,8 @@ namespace com.github.lhervier.ksp.bulldozermod.terrain
     /// </summary>
     public struct BandRaster
     {
-        // The mask's frame, kept so a surface direction can be turned into pixels of THIS mask.
-        private Quaternion _rot;
-        private double _bodyRadius;
-        private double _decalRadius;
-        private int _size;
+        // The mask's own pixel grid, kept so a surface direction can be turned into pixels of THIS mask.
+        private MaskProjection _projection;
 
         // The strip, in pixels of that mask.
         private Vector2 _center;
@@ -51,10 +47,7 @@ namespace com.github.lhervier.ksp.bulldozermod.terrain
                                          SurfaceBand band)
         {
             BandRaster raster = new BandRaster();
-            raster._rot = rot;
-            raster._bodyRadius = bodyRadius;
-            raster._decalRadius = decalRadius;
-            raster._size = size;
+            raster._projection = MaskProjection.Create(rot, bodyRadius, decalRadius, size);
 
             Vector2 start = raster.PixelOf(band.origin);
             Vector2 end = raster.PixelOf(band.End);
@@ -78,7 +71,13 @@ namespace com.github.lhervier.ksp.bulldozermod.terrain
         /// <summary>Side of the mask, in pixels.</summary>
         public int Size
         {
-            get { return _size; }
+            get { return _projection.Size; }
+        }
+
+        /// <summary>The pixel grid this strip was projected into.</summary>
+        public MaskProjection Projection
+        {
+            get { return _projection; }
         }
 
         /// <summary>
@@ -87,16 +86,13 @@ namespace com.github.lhervier.ksp.bulldozermod.terrain
         /// </summary>
         public Vector2 PixelOf(Vector3d direction)
         {
-            Vector3 rotated = _rot * (Vector3)direction;
-            double u = (rotated.x * _bodyRadius / _decalRadius + 1.0) * 0.5;
-            double v = (rotated.z * _bodyRadius / _decalRadius + 1.0) * 0.5;
-            return new Vector2((float)(u * _size), (float)(v * _size));
+            return _projection.PixelOf(direction);
         }
 
         /// <summary>Surface direction of a cell's center — the inverse of <see cref="PixelOf"/>.</summary>
         public Vector3d DirectionOf(int x, int y)
         {
-            return DirectionAt(x + 0.5, y + 0.5);
+            return _projection.DirectionOf(x, y);
         }
 
         /// <summary>
@@ -107,29 +103,7 @@ namespace com.github.lhervier.ksp.bulldozermod.terrain
         /// </summary>
         public Vector3d CornerDirection(int x, int y)
         {
-            return DirectionAt(x, y);
-        }
-
-        // Inverse of PixelOf at an arbitrary point of the pixel grid.
-        //
-        // The projection Parallax uses is orthographic onto the decal's tangent plane, so it inverts by
-        // putting the point back on the unit sphere and undoing the decal's rotation. Points outside the
-        // inscribed disk have no direction at all; they are pinned to the horizon rather than refused,
-        // which is harmless because the strip never reaches that far into a mask sized on its own quad.
-        //
-        // Carried through float, like PixelOf itself: that is ~6 cm on the Mun, two orders below the 5 m
-        // cell this locates.
-        private Vector3d DirectionAt(double px, double py)
-        {
-            double scale = _decalRadius / _bodyRadius;
-            double localX = (px * 2.0 / _size - 1.0) * scale;
-            double localZ = (py * 2.0 / _size - 1.0) * scale;
-            double squared = 1.0 - localX * localX - localZ * localZ;
-            double localY = squared > 0.0 ? Math.Sqrt(squared) : 0.0;
-
-            Vector3 direction = Quaternion.Inverse(_rot)
-                                * new Vector3((float)localX, (float)localY, (float)localZ);
-            return new Vector3d(direction.x, direction.y, direction.z);
+            return _projection.CornerDirection(x, y);
         }
 
         /// <summary>
@@ -210,9 +184,9 @@ namespace com.github.lhervier.ksp.bulldozermod.terrain
             // One cell of slack around the box: a cell is cleared as soon as the rectangle touches its
             // square, so the outermost cleared cells have their center outside the rectangle.
             minX = Mathf.Max(0, Mathf.FloorToInt(_center.x - reachX) - 1);
-            maxX = Mathf.Min(_size - 1, Mathf.CeilToInt(_center.x + reachX) + 1);
+            maxX = Mathf.Min(_projection.Size - 1, Mathf.CeilToInt(_center.x + reachX) + 1);
             minY = Mathf.Max(0, Mathf.FloorToInt(_center.y - reachY) - 1);
-            maxY = Mathf.Min(_size - 1, Mathf.CeilToInt(_center.y + reachY) + 1);
+            maxY = Mathf.Min(_projection.Size - 1, Mathf.CeilToInt(_center.y + reachY) + 1);
             return minX <= maxX && minY <= maxY;
         }
 
@@ -244,8 +218,8 @@ namespace com.github.lhervier.ksp.bulldozermod.terrain
         // 1 keeps the scatter, 0 clears it — the mask's own convention, with the sampler's clamp addressing.
         private float Keep(int x, int y)
         {
-            int cx = x < 0 ? 0 : (x > _size - 1 ? _size - 1 : x);
-            int cy = y < 0 ? 0 : (y > _size - 1 ? _size - 1 : y);
+            int cx = x < 0 ? 0 : (x > _projection.Size - 1 ? _projection.Size - 1 : x);
+            int cy = y < 0 ? 0 : (y > _projection.Size - 1 ? _projection.Size - 1 : y);
             return CellCleared(cx, cy) ? 0f : 1f;
         }
     }

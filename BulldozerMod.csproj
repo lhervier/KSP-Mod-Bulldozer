@@ -58,6 +58,26 @@
       <HintPath>$(KSP_DATA_DIR)\Managed\UnityEngine.InputLegacyModule.dll</HintPath>
       <Private>false</Private>
     </Reference>
+    <Reference Include="UnityEngine.InputModule">
+      <HintPath>$(KSP_DATA_DIR)\Managed\UnityEngine.InputModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="UnityEngine.UI">
+      <HintPath>$(KSP_DATA_DIR)\Managed\UnityEngine.UI.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="UnityEngine.UIModule">
+      <HintPath>$(KSP_DATA_DIR)\Managed\UnityEngine.UIModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="UnityEngine.TextRenderingModule">
+      <HintPath>$(KSP_DATA_DIR)\Managed\UnityEngine.TextRenderingModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="UnityEngine.ImageConversionModule">
+      <HintPath>$(KSP_DATA_DIR)\Managed\UnityEngine.ImageConversionModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
     <Reference Include="UnityEngine.IMGUIModule">
       <HintPath>$(KSP_DATA_DIR)\Managed\UnityEngine.IMGUIModule.dll</HintPath>
       <Private>false</Private>
@@ -69,11 +89,9 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Include="Src\**\*.cs" />
-    <!-- Only the shared classes the embryo actually uses (the rest of KSP-Shared is the uGUI
-         toolkit, which would drag in many more Unity module references). Widen to
-         KSP-Shared\Src\**\*.cs if/when this mod needs the uGUI library. -->
-    <Compile Include="KSP-Shared\Src\shared\Constants.cs" />
-    <Compile Include="KSP-Shared\Src\shared\ModLogger.cs" />
-    <Compile Include="KSP-Shared\Src\shared\ModLocalization.cs" />
+    <!-- The whole shared module, uGUI toolkit included: the debug window is built with it, which is
+         what the extra UnityEngine.UI / UIModule / TextRendering / Input references above are for.
+         Compiled into this DLL file by file, never referenced as a binary (see the kspmod CLAUDE.md). -->
+    <Compile Include="KSP-Shared\Src\**\*.cs" />
   </ItemGroup>
 </Project>
