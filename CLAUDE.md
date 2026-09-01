@@ -299,7 +299,7 @@ Le squelette de persistance et d'application « à froid » a été conservé ; 
 
 | Fichier | Rôle |
 |---|---|
-| `Src/BulldozerCleanModule.cs` | Le `PartModule` des trois lames : entrée PAW **« Passer la lame »**, curseurs **longueur** (5→200 m) et **largeur** (5→20 m) par pas de 5 m, **usure restante**, **coût de la passe**, **hauteur au sol** et **inclinaison** en direct. Construit la bande, relève les quads impactés, applique les règles de refus **et le quota**, débite la lame, enregistre l'action puis save+reload. `TryBuildBand` ne prend qu'une **lame** — origine = son tranchant, direction = son `bladeFace` — et c'est le **seul** chemin : les calques l'appellent aussi, avec la lame en aperçu, pour viser la bande exacte du clic |
+| `Src/BulldozerCleanModule.cs` | Le `PartModule` des trois lames : entrée PAW **« Passer la lame »**, curseurs **longueur** (5→200 m) et **largeur** (5→20 m) par pas de 5 m, **usure restante**, **coût de la passe**, **hauteur au sol** et **inclinaison** en direct. Construit la bande, relève les quads impactés, applique les règles de refus **et le quota**, **demande confirmation**, puis débite la lame, enregistre l'action et save+reload. `TryBuildBand` ne prend qu'une **lame** — origine = son tranchant, direction = son `bladeFace` — et c'est le **seul** chemin : les calques l'appellent aussi, avec la lame en aperçu, pour viser la bande exacte du clic |
 | `Src/terrain/PassCost.cs` | Ce qu'une passe coûte : les cases qu'elle ferait passer de blanc à noir, **chacune imputée au seul quad qui la possède**. Repasser sur du propre est gratuit ; nettoyer un terrain sans cailloux est plein tarif |
 | `GameData/BulldozerMod/Parts/*.cfg` | Les trois lames (BD-2 / BD-3 / BD-5), branchées sur leurs propres modèles |
 | `GameData/BulldozerMod/Parts/*.mu` | Les maillages, **produits de build** : ne jamais les éditer, relancer le générateur |
@@ -586,6 +586,16 @@ Ce qu'on garde à la place : un prix **déterministe et fonction du seul geste**
 Le quota est un état de **pièce** (`cellsLeft`, `isPersistant` sur le PartModule), pas une donnée du `ScenarioModule` : il appartient à la lame, pas à la partie. Il est débité **avant** `HighLogic.CurrentGame.Updated()`, sinon le rechargement ramènerait une lame qui n'a pas payé.
 
 **Ce que le joueur voit** : le coût de la passe réglée s'affiche en direct dans le PAW (rafraîchi 2×/s tant que la fenêtre est ouverte), à côté de l'usure restante. Coût > restant → refus chiffré, **sans rechargement** ; coût nul (tout est déjà propre) → refus aussi, pour la même raison : le rechargement est la partie chère d'une passe, pas la lame.
+
+**Et le clic demande confirmation** (2026-09-01) — un `PopupDialog` stock, comme KSP-ReRoot pour le même geste. La raison n'est pas la prudence en général : une passe dépense deux choses **irréversibles pour le joueur**, l'usure de la lame et un rechargement de la partie, et aucune des deux ne se lit sur le bouton. La boîte annonce donc les trois nombres qui décident (cases consommées, restantes, restantes après) et le rechargement, avec **Annuler** en face.
+
+Trois points de construction :
+
+- **Le clic est coupé en deux** : `PrepareAndConfirm` (tous les refus, le prix) et `Commit` (débit, enregistrement, save+reload). Les refus tombent donc **avant** la boîte — on ne fait pas confirmer une passe qui va être refusée.
+- **La boîte applique l'instantané qu'elle a annoncé**, pas une passe re-mesurée : bande, quads, coût et lat/lon sont capturés dans `PrepareAndConfirm` et passés à `Commit`. Le jeu continue de tourner derrière un `PopupDialog` stock, donc le rover peut dériver de quelques centimètres — le prix affiché reste le prix débité.
+- **Le try/catch est sur les deux moitiés** (`Guarded`), parce que `Commit` part d'un bouton de la boîte, longtemps après le retour de `ClearScatters` : un try/catch autour du clic ne serait plus sur la pile.
+
+⚠️ **Un popin `KSP-Shared` ne convient pas ici** : il lui faut une fenêtre à nous pour vivre dedans, et un PAW n'en est pas une. D'où le `PopupDialog` stock, dont le label « Annuler » vient quand même de la clé partagée `commonCancel`.
 
 ### Plusieurs lames sur un même vaisseau (2026-08-31)
 

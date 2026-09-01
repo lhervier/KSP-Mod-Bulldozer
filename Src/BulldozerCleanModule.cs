@@ -205,9 +205,17 @@ namespace com.github.lhervier.ksp.bulldozermod
                   guiName = "#LOC_BulldozerMod_clearScatters")]
         public void ClearScatters()
         {
+            Guarded(PrepareAndConfirm);
+        }
+
+        // Runs one half of the click flow, turning anything unexpected into a single screen message.
+        // Needed on BOTH halves rather than around the click: the second one runs from a dialog button,
+        // long after ClearScatters has returned, so a try/catch there would no longer be on the stack.
+        private void Guarded(Action step)
+        {
             try
             {
-                RecordAndReload();
+                step();
             }
             catch (Exception e)
             {
@@ -636,7 +644,11 @@ namespace com.github.lhervier.ksp.bulldozermod
             return true;
         }
 
-        private void RecordAndReload()
+        /// <summary>
+        /// Everything a pass has to satisfy, ending on the confirmation dialog. Charges nothing and writes
+        /// nothing: <see cref="Commit"/> is what a confirmed pass actually does.
+        /// </summary>
+        private void PrepareAndConfirm()
         {
             // This blade's own vessel, not the active one: a PAW can be opened on a rover parked next door,
             // and the pass belongs to the blade that was clicked. Only the camera stays where it is — see
@@ -726,15 +738,50 @@ namespace com.github.lhervier.ksp.bulldozermod
                 return;
             }
 
-            // Charged BEFORE the game is snapshotted below, or the reload would bring back a blade that
-            // never paid for this pass.
-            cellsLeft -= cost;
-            SyncWear();
-
+            // The pass is legal: ask before spending anything. The wear is the one thing a pass spends
+            // that cannot be got back, and the reload is a manoeuvre the player has to be ready for — so
+            // both are said here, with the numbers that decide them, rather than found out afterwards.
+            //
+            // Everything the dialog announces is settled HERE, and it is that snapshot Commit applies: the
+            // price shown is the price charged and the strip cleared is the one that was priced, whatever
+            // the rover drifts to while the dialog is up. The game keeps running behind a stock PopupDialog.
+            //
+            // Stock dialog rather than the shared uGUI popin: a popin needs a window of ours to live in,
+            // and a PAW is not one.
+            //
             // The very origin the band was built from, so the strip replayed at load starts where this
             // one did — at the blade's edge, not at the middle of the rover.
             double lat, lon;
             GetOrigin(out lat, out lon);
+
+            int left = Mathf.RoundToInt(cellsLeft);
+            PopupDialog.SpawnPopupDialog(
+                new Vector2(0.5f, 0.5f),
+                new Vector2(0.5f, 0.5f),
+                new MultiOptionDialog(
+                    "bulldozerPassConfirm",
+                    ModLocalization.GetString("confirmMessage", cost, left, left - cost),
+                    ModLocalization.GetString("confirmTitle"),
+                    HighLogic.UISkin,
+                    new DialogGUIButton(ModLocalization.GetString("confirmOk"),
+                                        () => Guarded(() => Commit(body, band, quads, cost, lat, lon)),
+                                        true),
+                    new DialogGUIButton(ModLocalization.GetString("commonCancel"), () => { }, true)),
+                false,
+                HighLogic.UISkin);
+        }
+
+        /// <summary>
+        /// Charges the blade, records the pass and reloads the game. Runs on the player's confirmation,
+        /// against the snapshot <see cref="PrepareAndConfirm"/> priced — never a freshly measured pass.
+        /// </summary>
+        private void Commit(CelestialBody body, SurfaceBand band, List<QuadRef> quads, int cost,
+                            double lat, double lon)
+        {
+            // Charged BEFORE the game is snapshotted below, or the reload would bring back a blade that
+            // never paid for this pass.
+            cellsLeft -= cost;
+            SyncWear();
 
             BulldozerAction action = new BulldozerAction
             {
