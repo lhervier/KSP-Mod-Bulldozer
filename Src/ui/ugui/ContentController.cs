@@ -1,10 +1,13 @@
+using System;
 using UnityEngine;
+using com.github.lhervier.ksp.shared;
 using com.github.lhervier.ksp.shared.ugui.checkbox;
+using com.github.lhervier.ksp.shared.ugui.combo;
 
 namespace com.github.lhervier.ksp.bulldozermod.ui.ugui
 {
     /// <summary>
-    /// Behaviour of the window content: each checkbox drives its switch through the view model, and is
+    /// Behaviour of the window content: each control drives its setting through the view model, and is
     /// synced back from it whenever the window is shown.
     ///
     /// The sync matters here rather than being belt-and-braces: the window is rebuilt from scratch every
@@ -22,11 +25,14 @@ namespace com.github.lhervier.ksp.bulldozermod.ui.ugui
 
         private CheckboxController _cleanedZonesCheckbox;
         private CheckboxController _dumpButtonCheckbox;
+        private ComboController _logLevelCombo;
         public ContentController WithControls(CheckboxController cleanedZonesCheckbox,
-                                              CheckboxController dumpButtonCheckbox)
+                                              CheckboxController dumpButtonCheckbox,
+                                              ComboController logLevelCombo)
         {
             this._cleanedZonesCheckbox = cleanedZonesCheckbox;
             this._dumpButtonCheckbox = dumpButtonCheckbox;
+            this._logLevelCombo = logLevelCombo;
             return this;
         }
 
@@ -40,6 +46,12 @@ namespace com.github.lhervier.ksp.bulldozermod.ui.ugui
             {
                 _dumpButtonCheckbox.OnToggled.Add(OnDumpButtonToggled);
             }
+            // The options only exist once: OnEnable then only selects among them.
+            if (_logLevelCombo != null)
+            {
+                _logLevelCombo.SetOptions(LogLevels.Names, _viewModel.LogLevel.ToString());
+                _logLevelCombo.OnSelect.Add(OnLogLevelSelected);
+            }
         }
 
         public void OnDestroy()
@@ -51,6 +63,10 @@ namespace com.github.lhervier.ksp.bulldozermod.ui.ugui
             if (_dumpButtonCheckbox != null)
             {
                 _dumpButtonCheckbox.OnToggled.Remove(OnDumpButtonToggled);
+            }
+            if (_logLevelCombo != null)
+            {
+                _logLevelCombo.OnSelect.Remove(OnLogLevelSelected);
             }
         }
 
@@ -66,6 +82,10 @@ namespace com.github.lhervier.ksp.bulldozermod.ui.ugui
             {
                 _dumpButtonCheckbox.SetChecked(_viewModel.ShowDumpButton);
             }
+            if (_logLevelCombo != null)
+            {
+                _logLevelCombo.Select(_viewModel.LogLevel.ToString());
+            }
         }
 
         private void OnCleanedZonesToggled(bool value)
@@ -76,6 +96,15 @@ namespace com.github.lhervier.ksp.bulldozermod.ui.ugui
         private void OnDumpButtonToggled(bool value)
         {
             _viewModel.ShowDumpButton = value;
+        }
+
+        private void OnLogLevelSelected(string value)
+        {
+            LogLevel level;
+            if (Enum.TryParse(value, out level))
+            {
+                _viewModel.LogLevel = level;
+            }
         }
     }
 }

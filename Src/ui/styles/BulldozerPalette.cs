@@ -11,10 +11,10 @@ namespace com.github.lhervier.ksp.bulldozermod.ui.styles
         // Main window
         // ==============================================================
 
-        // Sized to its content rather than to a mockup: two checkbox rows, with room for the labels to
-        // breathe and for a third one to be added without reopening this file.
+        // Sized to its content rather than to a mockup: two checkbox rows and the log level combo, with
+        // room for the labels to breathe and for another row to be added without reopening this file.
         public const float WindowWidth = 320f;
-        public const float WindowHeight = 110f;
+        public const float WindowHeight = 145f;
 
         // ==============================================================
         // Content

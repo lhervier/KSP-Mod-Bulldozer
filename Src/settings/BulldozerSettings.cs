@@ -28,6 +28,9 @@ namespace com.github.lhervier.ksp.bulldozermod.settings
         /// <summary>Whether the blades offer their log-only diagnostic entry in the PAW.</summary>
         public bool ShowDumpButton { get; set; }
 
+        /// <summary>How verbose the mod's logging is.</summary>
+        public LogLevel LogLevel { get; set; }
+
         public BulldozerSettings()
         {
             string dll = Assembly.GetExecutingAssembly().Location;
@@ -42,6 +45,9 @@ namespace com.github.lhervier.ksp.bulldozermod.settings
 
             // Off by default: it is a test tool, and it sits in the PAW of every blade.
             ShowDumpButton = false;
+
+            // Same default as the sibling mods: what the player is meant to see in KSP.log, no more.
+            LogLevel = LogLevel.Info;
         }
 
         /// <summary>Reads the settings file, falling back on the defaults when it is missing or unreadable.</summary>
@@ -70,8 +76,22 @@ namespace com.github.lhervier.ksp.bulldozermod.settings
             general.TryGetValue("showDumpButton", ref showDumpButton);
             ShowDumpButton = showDumpButton;
 
+            string logLevel = LogLevel.ToString();
+            general.TryGetValue("logLevel", ref logLevel);
+            // An unknown level (hand-edited file, or a level dropped from the enum) keeps the default
+            // rather than silencing the log.
+            LogLevel parsed;
+            if (Enum.TryParse(logLevel, out parsed) && Enum.IsDefined(typeof(LogLevel), parsed))
+            {
+                LogLevel = parsed;
+            }
+            else
+            {
+                LOGGER.LogWarning($"Unknown log level '{logLevel}', keeping {LogLevel}");
+            }
+
             LOGGER.LogInfo($"Settings loaded from {_path} (showCleanedZones={ShowCleanedZones}, " +
-                           $"showDumpButton={ShowDumpButton})");
+                           $"showDumpButton={ShowDumpButton}, logLevel={LogLevel})");
         }
 
         /// <summary>Writes the settings file, creating PluginData/ on first save.</summary>
@@ -83,6 +103,7 @@ namespace com.github.lhervier.ksp.bulldozermod.settings
                 ConfigNode general = root.AddNode(GeneralNode);
                 general.AddValue("showCleanedZones", ShowCleanedZones);
                 general.AddValue("showDumpButton", ShowDumpButton);
+                general.AddValue("logLevel", LogLevel.ToString());
 
                 Directory.CreateDirectory(Path.GetDirectoryName(_path));
                 root.Save(_path);

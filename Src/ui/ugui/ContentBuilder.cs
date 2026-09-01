@@ -3,13 +3,15 @@ using UnityEngine.UI;
 using com.github.lhervier.ksp.shared;
 using com.github.lhervier.ksp.shared.ugui;
 using com.github.lhervier.ksp.shared.ugui.checkbox;
+using com.github.lhervier.ksp.shared.ugui.combo;
 using com.github.lhervier.ksp.bulldozermod.ui.styles;
 
 namespace com.github.lhervier.ksp.bulldozermod.ui.ugui
 {
     /// <summary>
-    /// Popup content (everything below the shared title bar): the debug switches, one per row. Mounted and
-    /// stretched to fill the content host by the PopupBuilder, so it only fills what it is given.
+    /// Popup content (everything below the shared title bar): the debug switches, one per row, then the
+    /// log level combo. Mounted and stretched to fill the content host by the PopupBuilder, so it only
+    /// fills what it is given.
     /// </summary>
     public class ContentBuilder : IUGUIBuilder<ContentController>
     {
@@ -52,10 +54,18 @@ namespace com.github.lhervier.ksp.bulldozermod.ui.ugui
                 .Build();
             dumpButtonCheckbox.transform.SetParent(rootGo.transform, false);
 
+            // Parented by the builder itself: the combo hands its floating dropdown and its click trap
+            // that same parent, and only reparents them onto the canvas while open.
+            ComboController logLevelCombo = new ComboBuilder()
+                .WithParent(rootGo.transform)
+                .WithLabel(ModLocalization.GetString("debugLogLevel"))
+                .WithLabelFor(LogLevels.LabelFor)
+                .Build();
+
             return rootGo
                 .AddComponent<ContentController>()
                 .WithViewModel(_viewModel)
-                .WithControls(cleanedZonesCheckbox, dumpButtonCheckbox);
+                .WithControls(cleanedZonesCheckbox, dumpButtonCheckbox, logLevelCombo);
         }
     }
 }

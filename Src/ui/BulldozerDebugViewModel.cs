@@ -1,4 +1,5 @@
 using UnityEngine;
+using com.github.lhervier.ksp.shared;
 using com.github.lhervier.ksp.bulldozermod.diagnostics;
 using com.github.lhervier.ksp.bulldozermod.parallax;
 using com.github.lhervier.ksp.bulldozermod.settings;
@@ -25,12 +26,17 @@ namespace com.github.lhervier.ksp.bulldozermod.ui
         public readonly EventVoid OnShowDumpButtonChanged =
             new EventVoid("BulldozerDebugViewModel.OnShowDumpButtonChanged");
 
+        /// <summary>Fired whenever <see cref="LogLevel"/> changes.</summary>
+        public readonly EventVoid OnLogLevelChanged =
+            new EventVoid("BulldozerDebugViewModel.OnLogLevelChanged");
+
         /// <summary>Binds the view model to the settings and applies them. Call once, right after AddComponent.</summary>
         public BulldozerDebugViewModel WithSettings(BulldozerSettings settings)
         {
             _settings = settings;
             CleanedZonesOverlay.Active = settings.ShowCleanedZones;
             BandDiagnostic.ButtonVisible = settings.ShowDumpButton;
+            ModLogger.SetLogLevel(settings.LogLevel);
             return this;
         }
 
@@ -65,6 +71,23 @@ namespace com.github.lhervier.ksp.bulldozermod.ui
                 _settings.Save();
                 BandDiagnostic.ButtonVisible = value;
                 OnShowDumpButtonChanged.Fire();
+            }
+        }
+
+        /// <summary>How verbose the mod's logging is.</summary>
+        public LogLevel LogLevel
+        {
+            get { return _settings != null ? _settings.LogLevel : LogLevel.Info; }
+            set
+            {
+                if (_settings == null || _settings.LogLevel == value)
+                {
+                    return;
+                }
+                _settings.LogLevel = value;
+                _settings.Save();
+                ModLogger.SetLogLevel(value);
+                OnLogLevelChanged.Fire();
             }
         }
     }
