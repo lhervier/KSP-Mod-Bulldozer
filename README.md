@@ -38,7 +38,13 @@ To uninstall, remove that folder. Zones already cleared in a save simply stop be
 
 ## How to use it
 
+> The mod is **fully translated into English** (and French). The screenshots below happen to come from a French game — everything they show reads in English in an English install.
+
 ### 1. Mount a blade
+
+The three blades live in the editor's **Ground** category, under *Miscellaneous*:
+
+![The blades in the editor](docs/60-Editor.png)
 
 The blades have **real colliders**. Left down, a blade digs into the ground and pins the rover in place — that is on purpose. Carry it on a **robotic hinge**, raise it to drive, lower it to work.
 
@@ -164,7 +170,7 @@ The cost per cell *drops* with size, so climbing the tech tree is rewarded; the 
 
 ### Two liveries
 
-Each blade ships with two paint jobs, picked from the colour swatches in the editor — **one entry in the part list**, one model, no extra part:
+Each blade ships with two paint jobs, picked from the colour swatches in the part's action window in the editor (the row of chips on the [editor screenshot](#1-mount-a-blade)) — **one entry in the part list**, one model, no extra part:
 
 | | **Raw steel** (default) | **Polished stainless** |
 |---|---|---|
