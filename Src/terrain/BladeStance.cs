@@ -17,10 +17,6 @@ namespace com.github.lhervier.ksp.bulldozermod.terrain
     /// </summary>
     public struct BladeStance
     {
-        // Local Scenery (layer 15): the terrain colliders, and what KSP itself raycasts for
-        // Vessel.heightFromTerrain. Parts live on other layers, so the blade cannot hit itself.
-        private const int TerrainMask = 1 << 15;
-
         // How far above the edge the ray starts. A blade doing its job is dug INTO the ground, and a ray
         // started at the edge itself would begin inside the terrain collider and report no hit at all.
         private const float ProbeLift = 5f;
@@ -53,7 +49,7 @@ namespace com.github.lhervier.ksp.bulldozermod.terrain
             Vector3 up = (Vector3)FlightGlobals.getUpAxis(body, edge);
             RaycastHit hit;
             if (!Physics.Raycast(edge + up * ProbeLift, -up, out hit, ProbeLift + ProbeReach,
-                                 TerrainMask, QueryTriggerInteraction.Ignore))
+                                 BulldozerConstants.TerrainMask, QueryTriggerInteraction.Ignore))
             {
                 return false;
             }

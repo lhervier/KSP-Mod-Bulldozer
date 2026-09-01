@@ -21,8 +21,6 @@ namespace com.github.lhervier.ksp.bulldozermod.diagnostics
     {
         private static readonly ModLogger LOGGER = new ModLogger("Diag");
 
-        private const string DecalGoName = "BulldozerScatterDecal";
-
         // Long enough for the terrain to have subdivided to max level around the vessel.
         private const float SettleDelay = 8f;
 
@@ -77,7 +75,7 @@ namespace com.github.lhervier.ksp.bulldozermod.diagnostics
             int found = 0;
             foreach (Transform child in sphere.transform)
             {
-                if (child.name != DecalGoName)
+                if (child.name != BulldozerConstants.DecalGoName)
                 {
                     continue;
                 }
@@ -255,7 +253,7 @@ namespace com.github.lhervier.ksp.bulldozermod.diagnostics
         {
             foreach (Transform child in body.pqsController.transform)
             {
-                if (child.name != DecalGoName)
+                if (child.name != BulldozerConstants.DecalGoName)
                 {
                     continue;
                 }

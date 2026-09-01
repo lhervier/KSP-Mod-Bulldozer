@@ -20,24 +20,16 @@ namespace com.github.lhervier.ksp.bulldozermod.parallax
     /// </summary>
     public class GroundSheet
     {
-        // Local Scenery: the layer the flight camera draws the terrain on, and where Parallax puts the
-        // scatter colliders the probes have to step past.
-        private const int DrawLayer = 15;
-
-        // How far the sheet is pulled towards the camera, per metre of distance to it, to keep it clear of
-        // the terrain's own depth. Proportional on purpose: depth precision degrades with distance, so a
-        // fixed offset that works up close stops working further out, while this one stays constant on
-        // screen.
-        private const float DepthBiasPerMetre = 0.002f;
-        private const float MinDepthBias = 0.02f;
-
-        // How far the sheet floats above the ground it was measured on, along the local vertical.
+        // How far the sheet floats above the ground it was measured on, along the local vertical. This is
+        // the ONLY thing separating a sheet from the terrain — see Draw() for why there is no camera-ward
+        // nudge on top — and it is enough: no z-fighting at all with the nudge removed (in flight,
+        // 2026-09-01, on both overlays at once).
         //
-        // The camera-ward nudge alone does not cover this one: at a grazing angle it is almost parallel to
-        // the ground and stops separating anything. And the vertices are positioned in a frame whose origin
-        // is the body center, so at planetary scale float carries them to within a few centimeters of where
-        // KSP puts the terrain — the lift has to clear that too, which is why it is decimetric rather than
-        // millimetric.
+        // Decimetric rather than millimetric because the vertices are positioned in a frame whose origin is
+        // the body center: at planetary scale float carries them to within a few centimeters of where KSP
+        // puts the terrain, and the lift has to clear that too. Being along the local vertical, it also
+        // keeps separating at a grazing angle, where a camera-ward offset would lie flat on the ground and
+        // separate nothing.
         private const float GroundLift = 0.15f;
 
         // The probe drops from this far above the ANALYTIC height of the very point it measures, over this
@@ -189,14 +181,24 @@ namespace com.github.lhervier.ksp.bulldozermod.parallax
             // the floating origin shifts the whole scene. The mesh itself never moves.
             Matrix4x4 frame = BodyToWorld(_body, _anchor);
 
-            Vector3 center = frame.MultiplyPoint3x4(Vector3.zero);
-            Vector3 toCamera = camera.transform.position - center;
-            float bias = Mathf.Max(MinDepthBias, DepthBiasPerMetre * toCamera.magnitude);
-
+            // NO camera-ward nudge here, unlike the rock highlight — GroundLift alone separates the sheet,
+            // and adding one is what put the two overlays out of register (measured in flight 2026-09-01,
+            // then confirmed by removing it). A sheet is drawn through ONE matrix, so the nudge could only
+            // be taken from a single point of it — the anchor — and the anchor is not where the sheet is
+            // looked at: the pass trace anchors on the middle of the strip, tens of metres from the camera,
+            // while a cleaned-zone sheet anchors on its QUAD CENTRE, up to 800 m away on Kerbin. The two
+            // translations then differ in length AND direction (from that far, "towards the camera" is
+            // nearly horizontal), so the same ground came out shifted by ~0.5 m between the two overlays —
+            // a tenth of a cell, plainly visible on a 5 m grid.
+            //
+            // The highlight escapes this because it draws one matrix PER INSTANCE, so its nudge is taken at
+            // the very point it moves. Do not copy it back here without making it per vertex, which the
+            // cached mesh cannot do.
+            //
             // Shadows OFF: a shadow-casting sheet lying on the ground draws a black outline of itself
             // beside itself, sliding around as the sun moves.
-            Graphics.DrawMesh(_mesh, Matrix4x4.Translate(toCamera.normalized * bias) * frame,
-                              material, DrawLayer, camera, 0, null, ShadowCastingMode.Off, false);
+            Graphics.DrawMesh(_mesh, frame, material, BulldozerConstants.TerrainLayer, camera, 0, null,
+                              ShadowCastingMode.Off, false);
         }
 
         /// <summary>Releases the mesh. Materials are shared and belong to the caller.</summary>
@@ -284,7 +286,8 @@ namespace com.github.lhervier.ksp.bulldozermod.parallax
             for (int attempt = 0; attempt < ProbeAttempts; attempt++)
             {
                 RaycastHit hit;
-                if (!Physics.Raycast(from, down, out hit, (float)ProbeLength - travelled, 1 << DrawLayer))
+                if (!Physics.Raycast(from, down, out hit, (float)ProbeLength - travelled,
+                                     BulldozerConstants.TerrainMask))
                 {
                     break;
                 }

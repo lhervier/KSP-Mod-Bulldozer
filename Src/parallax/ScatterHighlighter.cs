@@ -56,10 +56,6 @@ namespace com.github.lhervier.ksp.bulldozermod.parallax
         /// </summary>
         public static BulldozerCleanModule Source;
 
-        // Local Scenery. The scatters carry no renderer of their own, so there is no layer to inherit; this
-        // one is drawn by the flight camera and is where the terrain lives.
-        private const int DrawLayer = 15;
-
         // How far the overlay is pulled towards the camera, per metre of distance to it, to keep it clear
         // of the rock's own depth. Proportional on purpose: depth precision degrades with distance, so a
         // fixed offset that works up close stops working further out, while this one stays constant on
@@ -67,6 +63,11 @@ namespace com.github.lhervier.ksp.bulldozermod.parallax
         //
         // A camera-ward TRANSLATION, never a scale-up: see the DrawMesh call for why inflating is wrong on
         // a cluster mesh.
+        //
+        // Private again, and NOT shared with GroundSheet, although both once held this pair: what makes it
+        // right here is that it is recomputed for every instance, at the point it moves. A sheet has one
+        // matrix for the whole thing, so the same code there could only nudge from its anchor — which is
+        // exactly the bug that put the two ground overlays half a metre out of register. See GroundSheet.Draw.
         private const float DepthBiasPerMetre = 0.002f;
         private const float MinDepthBias = 0.02f;
 
@@ -306,7 +307,7 @@ namespace com.github.lhervier.ksp.bulldozermod.parallax
                         mesh,
                         Matrix4x4.TRS(world + toCamera.normalized * bias, rotation,
                                       Vector3.Scale(quadScale, position.localScale)),
-                        material, DrawLayer, camera, 0, null, ShadowCastingMode.Off, false);
+                        material, BulldozerConstants.TerrainLayer, camera, 0, null, ShadowCastingMode.Off, false);
 
                     shown++;
                     _shown[slot]++;

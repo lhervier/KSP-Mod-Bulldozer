@@ -26,10 +26,6 @@ namespace com.github.lhervier.ksp.bulldozermod.terrain
     {
         private static readonly ModLogger LOGGER = new ModLogger("ScatterCleaner");
 
-        // Name of the GameObjects we create, so the purge removes OUR decals only — Parallax ships its own
-        // (the KSC mask) and those must survive untouched.
-        private const string DecalGoName = "BulldozerScatterDecal";
-
         // Matches Parallax's own KSC decal. Anything high works: the exclusion is read from a per-quad
         // registry, not from the PQSMod ordering.
         private const int DecalOrder = 99999;
@@ -168,7 +164,7 @@ namespace com.github.lhervier.ksp.bulldozermod.terrain
             double footprint = quad.halfDiagonal * FootprintMargin;
 
             // Child of the PQS: SetupMods()/GetChildMods() collect PQSMods from the sphere's children.
-            GameObject go = new GameObject(DecalGoName);
+            GameObject go = new GameObject(BulldozerConstants.DecalGoName);
             go.transform.SetParent(sphere.transform, false);
 
             // The quad center comes straight from PQ.positionPlanetRelative, in the very frame the decal
@@ -205,7 +201,7 @@ namespace com.github.lhervier.ksp.bulldozermod.terrain
                 doomed.Clear();
                 foreach (Transform child in body.pqsController.transform)
                 {
-                    if (child.name == DecalGoName)
+                    if (child.name == BulldozerConstants.DecalGoName)
                     {
                         doomed.Add(child.gameObject);
                     }
