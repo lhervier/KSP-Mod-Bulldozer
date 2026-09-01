@@ -301,10 +301,10 @@ Le squelette de persistance et d'application « à froid » a été conservé ; 
 |---|---|
 | `Src/BulldozerCleanModule.cs` | Le `PartModule` des trois lames : entrée PAW **« Passer la lame »**, curseurs **longueur** (5→200 m) et **largeur** (5→20 m) par pas de 5 m, **usure restante**, **coût de la passe**, **hauteur au sol** et **inclinaison** en direct. Construit la bande, relève les quads impactés, applique les règles de refus **et le quota**, **demande confirmation**, puis débite la lame, enregistre l'action et save+reload. `TryBuildBand` ne prend qu'une **lame** — origine = son tranchant, direction = son `bladeFace` — et c'est le **seul** chemin : les calques l'appellent aussi, avec la lame en aperçu, pour viser la bande exacte du clic |
 | `Src/terrain/PassCost.cs` | Ce qu'une passe coûte : les cases qu'elle ferait passer de blanc à noir, **chacune imputée au seul quad qui la possède**. Repasser sur du propre est gratuit ; nettoyer un terrain sans cailloux est plein tarif |
-| `GameData/BulldozerMod/Parts/*.cfg` | Les trois lames (BD-2 / BD-3 / BD-5), branchées sur leurs propres modèles |
+| `GameData/BulldozerMod/Parts/*.cfg` | Les trois lames (BD-2 / BD-3 / BD-5), branchées sur leurs propres modèles, et leur `ModulePartVariants` : **deux livrées** pour une seule entrée dans la liste de l'éditeur |
 | `GameData/BulldozerMod/Parts/*.mu` | Les maillages, **produits de build** : ne jamais les éditer, relancer le générateur |
-| `tools/make_blades.py` | Génère les trois modèles et les exporte en `.mu`. Toute la géométrie dérive de la **largeur** ; c'est aussi le seul endroit où vivent la convention d'axes Blender→Unity et la garantie « rien sous le point d'attache » |
-| `tools/render_blades.py` | Rend les trois lames en PNG en **important** le générateur — donc jamais une seconde description de la forme. Cadrage et focale **ajustés** à la géométrie, pour que les vues ne sortent pas du champ en silence quand les constantes changent. Sort dans `tools/renders/`, **non versionné** : ce sont des rendus de contrôle, à régénérer, pas du contenu de dépôt |
+| `tools/make_blades.py` | Génère les trois modèles et les exporte en `.mu`. Toute la géométrie dérive de la **largeur** ; c'est aussi le seul endroit où vivent la convention d'axes Blender→Unity, la garantie « rien sous le point d'attache », et les **deux livrées** — celle que le `.mu` embarque et celle qui n'existe qu'en `.cfg`, dont il imprime le bloc |
+| `tools/render_blades.py` | Rend les trois lames en PNG en **important** le générateur — donc jamais une seconde description de la forme **ni de la peinture**. Une image par vue et par livrée : c'est le seul moyen de voir une livrée qui n'existe qu'en `.cfg` sans installer le mod. Cadrage et focale **ajustés** à la géométrie, pour que les vues ne sortent pas du champ en silence quand les constantes changent. Sort dans `tools/renders/`, **non versionné** : ce sont des rendus de contrôle, à régénérer, pas du contenu de dépôt |
 | `Src/parallax/ParallaxInterop.cs` | Tout ce qu'on fait avec Parallax : pose du decal, liste des scatters d'un corps, purge du registre statique. **Compilé contre `ParallaxContinued.dll`** : une évolution de son API casse le build, pas le vol |
 | `Src/parallax/BulldozerScatterDecal.cs` | Le decal lui-même : sous-classe du PQSMod de Parallax, **attachée à un seul quad** (celui dont elle occupe le centre). `RotationFor` = source unique du `rot` du masque |
 | `Src/parallax/ScatterHighlighter.cs` | L'aperçu, et **la seule chose qui dit la vérité** sur ce qu'une passe enlèvera. Porte `Source`, la lame en cours de prévisualisation — **une seule à la fois** (coût), et c'est elle que tous les calques visent : pour chaque quad en portée il construit le masque que l'injection construirait (`ScatterCleaner.RasterFor`) et pose au shader sa propre question (bilinéaire, `< 0.5`) à la position de chaque instance. Montre donc la pixelisation, les décrochements de couture et les quads pris par un autre mod. Ne voit que les scatters **collidables** — l'herbe part aussi, sans jamais avoir été surlignée, et seulement ceux que Parallax a **chargés** : c'est `BandTrace` qui couvre le reste de la bande |
@@ -653,6 +653,37 @@ Trois choses qu'il a fallu établir plutôt que deviner, et qu'il ne faut pas re
 ⚠️ **Ce n'est pas le tranchant qui descendait le plus bas** mais le **dessous de la lèvre** : l'épaisseur est reportée le long de la normale du profil, qui bascule vers le bas sur un tranchant incliné (−11 à −16 mm mesurés selon le modèle). Le décalage vertical est donc **mesuré** sur le profil construit, jamais supposé — c'est le genre d'erreur qui passe inaperçue à l'œil et fausse la garantie.
 
 Vérifié en relisant les `.mu` : largeurs exactement 2 / 3 / 5 m, point le plus bas à `+0.000000` sur les trois, collider couvrant tout depuis z = 0, `bladeFace` présent avec rotation identité, UV présents, deux matériaux `KSP/Specular`.
+
+### Deux livrées : acier brut et inox poli (2026-09-01)
+
+Le gris d'origine est assez sombre. Une seconde peinture, plus brillante, est offerte **sans ajouter de pièce** : c'est une variante `ModulePartVariants`, choisie par les pastilles de couleur dans le PAW en éditeur. Aucun modèle, aucune texture, aucun code — que du `.cfg`.
+
+| | `Steel` — acier brut (base) | `Stainless` — inox poli |
+|---|---|---|
+| Corps (`…Steel`) | `#858a8f`, spéc. `#595c61`, `_Shininess` 0,30 | `#dbe0e6`, spéc. `#80858c`, `_Shininess` 0,50 |
+| Lèvre (`…Edge`) | `#33363b`, spéc. `#595c61`, `_Shininess` 0,55 | `#7a8087`, spéc. `#757a82`, `_Shininess` 0,60 |
+| Thème stock | `Gray` | `Silver` |
+
+Ce qui monte sur l'inox, c'est d'abord le **fond** : l'albédo final vaut `texture × _Color`, or la texture partagée est un gris plat à 0,66, ce qui donne ~0,35 en brut contre ~0,58 en poli. La lèvre reste plus sombre que le corps dans les deux livrées, sinon la lame devient une tôle plate de loin.
+
+⚠️ **Le reflet, lui, a dû être rabattu — première version trop forte, vue en jeu le 2026-09-01 : un vrai miroir.** Les deux réglages ne font pas le même travail, et un seul est « à quel point ça brille » :
+
+- **`_SpecColor` = la FORCE du reflet.** C'est le bouton à tourner. Vers le blanc, la surface devient un miroir ; vers la teinte de fond, l'éclat s'éteint. Ramené de `#e6ebf2` (0,92) à `#80858c` (0,52), soit ~1,5× le brut au lieu de ~2,5×.
+- **`_Shininess` = la LARGEUR du reflet** (exposant Blinn-Phong, pas une quantité). Haut, il concentre tout dans un point dur — ce qui se lit comme du chrome ; moyen, il l'étale en bande douce, ce qui se lit comme du métal brossé. Ramené de 0,82 à 0,50.
+- La **teinte de fond n'a pas bougé** : c'est elle qui était voulue plus claire.
+
+⚠️ **Il n'y a pas de gloss map en secours** : la texture partagée est écrite **sans canal alpha** (vérifié : PNG de type couleur 2, RGB), donc le terme de gloss du shader vaut 1 partout et toute la force du reflet tient dans `_SpecColor`. Ajouter un alpha donnerait un troisième bouton — mais **commun aux deux livrées**, qui échantillonnent la même texture.
+
+Le rendu de contrôle sait maintenant montrer ce réglage (l'entrée `Specular` du Principled suit `_SpecColor`) : il donne le **sens** d'une variation, pas le rendu du jeu — un miroir se serait quand même vu.
+
+**Les deux livrées vivent dans `tools/make_blades.py`** (`LIVERIES`), qui imprime le bloc `ModulePartVariants` complet, prêt à coller, en même temps que les autres lignes de `.cfg`. C'est la même règle que pour la géométrie : la livrée de base est cuite dans le `.mu`, l'autre n'existe qu'en `.cfg`, et **rien ne les confronte au chargement** — un override périmé ne se voit que sur la pièce, dans l'éditeur. Donc on relance le générateur, on ne retape pas des couleurs à la main. Le renderer sait rendre chaque livrée (`--livery Stainless`, ou les deux par défaut), seul moyen de regarder l'inox sans installer.
+
+Le mécanisme et ses pièges (`materialName` apparié en `StartsWith`, `themeName` qui doit exister sous peine d'erreur au chargement, `description` qui est de la config morte, typage des valeurs d'un nœud `TEXTURE`) sont dans le [CLAUDE.md parent](../CLAUDE.md), « Repeindre une pièce sans en ajouter une ». Deux choix propres à ce mod :
+
+- **Thèmes stock plutôt que thèmes maison.** `Gray` et `Silver` existent déjà, ce qui évite l'erreur `Unable to find theme named` **et** fait suivre les lames quand le joueur bascule le thème de tout le vaisseau.
+- **Peinture seule.** Ni masse, ni coût, ni quota, ni géométrie ne changent — d'où `useMultipleDragCubes = false`. Une livrée ne doit pas devenir un choix de gameplay déguisé : ce qui sépare les lames, c'est le modèle, pas la couleur.
+
+✅ **Le mécanisme est vérifié en jeu le 2026-09-01** : les deux pastilles apparaissent, la variante s'applique. Seul le **dosage** du reflet a demandé une seconde passe (ci-dessus) ; le rabattement, lui, n'a pas encore été revu en jeu.
 
 **Les trois icônes vont se ressembler**, et c'est structurel : KSP normalise l'icône sur la **plus grande dimension** du modèle — ici la largeur, la seule chose qui sépare les trois lames (mécanisme et leviers dans le [CLAUDE.md parent](../CLAUDE.md), « Les icônes de l'éditeur sont générées au chargement »). Proportions normalisées : 1 : 0,46 : 0,43 / 1 : 0,41 : 0,36 / 1 : 0,37 : 0,30 — trop proches pour se distinguer dans la liste. Si ça gêne à l'usage, il faudra une différence de **forme** (nombre de bras, nervures), pas de taille. Corollaire rassurant au passage : le décentrage de nos modèles n'a **aucune** conséquence sur le cadrage de l'icône.
 

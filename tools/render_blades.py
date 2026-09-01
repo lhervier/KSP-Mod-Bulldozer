@@ -4,10 +4,12 @@ Renders the three bulldozer blades to PNG, for looking at the shapes without ope
 
     blender --background --python tools/render_blades.py
     blender --background --python tools/render_blades.py -- --out somewhere --width 1400
+    blender --background --python tools/render_blades.py -- --livery Stainless
 
-Writes one image per view into tools/renders by default. It builds the geometry by importing
-make_blades.py, so what it shows is always what the generator currently produces -- there is no
-second copy of the shape here to fall out of step with the first.
+Writes one image per view and per livery into tools/renders by default. It builds the geometry AND
+takes the liveries by importing make_blades.py, so what it shows is always what the generator
+currently produces -- there is no second copy of the shape or of the paint here to fall out of step
+with the first.
 
 Nothing about these images is exported to KSP. They are documentation, and a way to close the loop
 when tuning the shape constants in make_blades.py: change a number, re-run this, look.
@@ -48,7 +50,7 @@ def load_generator():
     return module
 
 
-def build_lineup(gen):
+def build_lineup(gen, livery_name=None):
     """Build the three blades side by side and return every mesh corner, in world space."""
     gen.clear_scene()
 
@@ -57,7 +59,7 @@ def build_lineup(gen):
     x = 0.0
     for name, width in gen.BLADES:
         x += width / 2.0
-        gen.build_blade(name, width, x)
+        gen.build_blade(name, width, x, livery_name)
         x += width / 2.0 + GAP
 
     bpy.context.view_layer.update()     # parenting only lands in matrix_world after this
@@ -163,25 +165,34 @@ def render(scene, points, view, path):
 
 
 def parse_args():
-    """Read the options given after '--', falling back to tools/renders at 1400 px wide."""
+    """Read the options given after '--', falling back to every livery in tools/renders, 1400 px."""
     args = sys.argv[sys.argv.index("--") + 1:] if "--" in sys.argv else []
     out = args[args.index("--out") + 1] if "--out" in args else os.path.join(HERE, "renders")
     width = int(args[args.index("--width") + 1]) if "--width" in args else 1400
-    return os.path.abspath(out), width
+    livery = args[args.index("--livery") + 1] if "--livery" in args else None
+    return os.path.abspath(out), width, livery
 
 
 def main():
-    out, width = parse_args()
+    out, width, livery = parse_args()
     os.makedirs(out, exist_ok=True)
 
     gen = load_generator()
-    points = build_lineup(gen)
-    scene = setup_scene(width)
 
-    for view in VIEWS:
-        path = os.path.join(out, "blades_%s.png" % view)
-        lens = render(scene, points, view, path)
-        print("rendered %s  (fitted lens %.0f mm)" % (path, lens))
+    # Every livery unless one is named. They differ only in paint, so this is the only way to see a
+    # .cfg-only livery at all -- it exists nowhere in the .mu, and otherwise only shows up in game.
+    # ⚠️ These are Blender previews of the tint, not of the KSP shader: the base colour is shown
+    # neat, without the grey texture KSP multiplies it by, so both come out lighter than in game.
+    liveries = [livery] if livery else [entry[0] for entry in gen.LIVERIES]
+    for livery_name in liveries:
+        # Lights and world go up AFTER the blades: build_lineup starts by emptying the scene, which
+        # would take them with it.
+        points = build_lineup(gen, livery_name)
+        scene = setup_scene(width)
+        for view in VIEWS:
+            path = os.path.join(out, "blades_%s_%s.png" % (view, livery_name.lower()))
+            lens = render(scene, points, view, path)
+            print("rendered %s  (fitted lens %.0f mm)" % (path, lens))
 
 
 if __name__ == "__main__":

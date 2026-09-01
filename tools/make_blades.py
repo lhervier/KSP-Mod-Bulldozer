@@ -64,6 +64,70 @@ FACE_EMPTY = "bladeFace"        # what the .cfg must put in bladeTransform
 
 
 # --------------------------------------------------------------------------------------------
+# Liveries
+# --------------------------------------------------------------------------------------------
+# A blade carries exactly two materials, and a livery gives the KSP/Specular triplet -- _Color,
+# _SpecColor, _Shininess -- of each. Their suffixes are what the part .cfg targets by name, so
+# renaming one means regenerating the .mu.
+MAT_BODY = "Steel"   # mouldboard, cheeks, push arms and mounting bracket
+MAT_EDGE = "Edge"    # the cutting lip alone
+
+# The FIRST livery is the one baked into the .mu. Every other one exists only as a
+# ModulePartVariants override in the part .cfg -- which main() prints, ready to paste, so that the
+# two descriptions cannot drift apart. Nothing checks them against each other at load time: a
+# stale override shows up nowhere but in the editor, on the part itself.
+#
+# The theme names are the STOCK ones (see Squad/Parts/VariantThemes.cfg). That is deliberate: a
+# theme KSP does not know logs an error from PartLoader, and reusing stock names lets the editor's
+# vessel-wide theme switch reach the blades along with everything else.
+#
+# TUNING THE SHEEN -- the two knobs do different jobs, and only one of them is "how shiny":
+#   _SpecColor  HOW STRONG the highlight is. This is the one to move. Raise it towards white and
+#               the surface turns into a mirror; drop it towards the base tint and the sheen fades.
+#   _Shininess  HOW TIGHT it is (Blinn-Phong exponent, not an amount). High values concentrate the
+#               highlight into a small hard glint -- which reads as chrome; middling values spread
+#               it into the soft band that reads as brushed metal.
+# A first pass at 0.92 / 0.82 came out a full mirror in game (2026-09-01). Both were cut back; the
+# base tint was left alone, since that is the part that was actually wanted brighter.
+#
+# ⚠️ There is no gloss map to fall back on: the shared texture is written without an alpha channel,
+# so the shader's gloss term sits at 1.0 everywhere and the whole strength of the highlight rides on
+# _SpecColor. Adding an alpha would give a third knob -- but a shared one, since both liveries
+# sample the same texture.
+LIVERIES = (
+    ("Steel", "Gray", "#LOC_BulldozerMod_bladeVariantSteel", {
+        #            _Color              _SpecColor          _Shininess
+        MAT_BODY: ((0.52, 0.54, 0.56), (0.35, 0.36, 0.38), 0.30),
+        MAT_EDGE: ((0.20, 0.21, 0.23), (0.35, 0.36, 0.38), 0.55),
+    }),
+    # Polished stainless: a lighter base tint than raw steel, plus a sheen that stays a sheen. The
+    # lip keeps a slightly tighter highlight than the body -- a cutting edge gets burnished by the
+    # work -- and stays noticeably darker, as it does on the raw livery, so the blade keeps its
+    # shape at a distance instead of turning into one flat sheet.
+    ("Stainless", "Silver", "#LOC_BulldozerMod_bladeVariantStainless", {
+        MAT_BODY: ((0.86, 0.88, 0.90), (0.50, 0.52, 0.55), 0.50),
+        MAT_EDGE: ((0.48, 0.50, 0.53), (0.46, 0.48, 0.51), 0.60),
+    }),
+)
+
+
+def to_hex(colour):
+    """The #rrggbb form of a colour, as ColorUtility.TryParseHtmlString reads it in a .cfg."""
+    return "#" + "".join("%02x" % max(0, min(255, int(round(c * 255.0)))) for c in colour)
+
+
+def finishes_for(livery_name=None):
+    """The two finishes of the named livery, defaulting to the one baked into the .mu."""
+    if livery_name is None:
+        return LIVERIES[0][3]
+    for name, _theme, _label, finishes in LIVERIES:
+        if name == livery_name:
+            return finishes
+    raise SystemExit("unknown livery %r, expected one of %s"
+                     % (livery_name, [entry[0] for entry in LIVERIES]))
+
+
+# --------------------------------------------------------------------------------------------
 # Dimensions
 # --------------------------------------------------------------------------------------------
 def dimensions(width):
@@ -257,8 +321,9 @@ def srgb_to_linear(c):
     return c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4
 
 
-def ksp_material(name, colour, shininess):
-    """Create a KSP/Specular material tinted with the given colour."""
+def ksp_material(name, finish):
+    """Create a KSP/Specular material carrying the given (colour, spec, shininess) finish."""
+    colour, spec, shininess = finish
     mat = bpy.data.materials.new(name)
 
     # Blender-side appearance only -- none of this is exported, the .mu carries mumatprop below.
@@ -270,6 +335,10 @@ def ksp_material(name, colour, shininess):
     if principled is not None:
         principled.inputs["Base Color"].default_value = colour + (1.0,)
         principled.inputs["Roughness"].default_value = 1.0 - shininess
+        # Wired so that turning the sheen down in LIVERIES visibly turns it down in a preview
+        # render too. It shows the DIRECTION of a change, not the game's look: Blender's Specular
+        # is a dielectric reflectance, KSP's _SpecColor a Blinn-Phong highlight colour.
+        principled.inputs["Specular"].default_value = min(1.0, max(spec))
 
     mp = mat.mumatprop
     mp.shaderName = "KSP/Specular"
@@ -284,7 +353,7 @@ def ksp_material(name, colour, shininess):
     item.value = colour + (1.0,)
     item = mp.color.properties.add()
     item.name = "_SpecColor"
-    item.value = (0.35, 0.36, 0.38, 1.0)
+    item.value = spec + (1.0,)
     item = mp.float3.properties.add()
     item.name = "_Shininess"
     item.value = shininess
@@ -314,13 +383,20 @@ def write_texture(path, size=64):
 # --------------------------------------------------------------------------------------------
 # Assembly
 # --------------------------------------------------------------------------------------------
-def build_blade(name, width, x_offset=0.0):
-    """Build one complete blade and return (root object, report dict)."""
+def build_blade(name, width, x_offset=0.0, livery_name=None):
+    """Build one complete blade and return (root object, report dict).
+
+    livery_name repaints the blade for a preview render; the export always leaves it None, since
+    the .mu may only ever carry the base livery -- the others are .cfg overrides on top of it.
+    """
     dim = dimensions(width)
     h, tp = dim["h"], dim["tp"]
 
-    steel = ksp_material(name + "Steel", (0.52, 0.54, 0.56), 0.30)
-    edge = ksp_material(name + "Edge", (0.20, 0.21, 0.23), 0.55)
+    # The material names are what the .cfg overrides target by prefix, so they have to stay exactly
+    # what LIVERIES targets: renaming one here means regenerating the .mu and editing three .cfg.
+    finishes = finishes_for(livery_name)
+    steel = ksp_material(name + MAT_BODY, finishes[MAT_BODY])
+    edge = ksp_material(name + MAT_EDGE, finishes[MAT_EDGE])
 
     root = bpy.data.objects.new(name, None)
     root.empty_display_type = "PLAIN_AXES"
@@ -436,6 +512,42 @@ def out_dir():
     return None
 
 
+def variants_cfg(name, indent=""):
+    """The lines of the ModulePartVariants node offering every livery but the baked-in one."""
+    t = "\t"        # the part .cfg files are tab-indented; this block is meant to paste into one
+    base_name, base_theme, base_label, base = LIVERIES[0]
+    out = ["MODULE", "{",
+           t + "name = ModulePartVariants",
+           # Colour-only variants: same geometry, so one drag cube covers all of them.
+           t + "useMultipleDragCubes = false",
+           t + "baseName = %s" % base_name,
+           t + "baseDisplayName = %s" % base_label,
+           t + "baseThemeName = %s" % base_theme,
+           t + "primaryColor = %s" % to_hex(base[MAT_BODY][0]),
+           t + "secondaryColor = %s" % to_hex(base[MAT_EDGE][0])]
+
+    for variant_name, theme, label, finishes in LIVERIES[1:]:
+        out += ["", t + "VARIANT", t + "{",
+                t * 2 + "name = %s" % variant_name,
+                t * 2 + "displayName = %s" % label,
+                t * 2 + "themeName = %s" % theme,
+                t * 2 + "primaryColor = %s" % to_hex(finishes[MAT_BODY][0]),
+                t * 2 + "secondaryColor = %s" % to_hex(finishes[MAT_EDGE][0])]
+        # One TEXTURE node per material: without materialName the override would hit both, and the
+        # cutting lip would lose the darker tint that tells it apart from the mouldboard.
+        for suffix in (MAT_BODY, MAT_EDGE):
+            colour, spec, shininess = finishes[suffix]
+            out += ["", t * 2 + "TEXTURE", t * 2 + "{",
+                    t * 3 + "materialName = %s%s" % (name, suffix),
+                    t * 3 + "_Color = %s" % to_hex(colour),
+                    t * 3 + "_SpecColor = %s" % to_hex(spec),
+                    t * 3 + "_Shininess = %.2f" % shininess,
+                    t * 2 + "}"]
+        out += [t + "}"]
+    out += ["}"]
+    return [indent + line if line else line for line in out]
+
+
 def main():
     if not hasattr(bpy.ops.export_object, "ksp_mu"):
         raise SystemExit("io_object_mu is not enabled in this Blender")
@@ -477,6 +589,8 @@ def main():
         print("        attachRules = 1,1,0,0,1")
         print("        bladeTransform = %s   (inside the MODULE node)" % FACE_EMPTY)
         print("        (stack node sits %.2f m above the cutting edge)" % r["stack_node_y"])
+        for line in variants_cfg(r["name"], indent="        "):
+            print(line)
         if "path" in r:
             print("    wrote %s" % r["path"])
     print("=" * 78)
