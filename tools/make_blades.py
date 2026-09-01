@@ -37,6 +37,25 @@ contact plane, the blade can never become the lowest point.
 
 EDGE_DROP trades that guarantee away for looks: raise it and the cutting edge sinks that many metres
 below the attach point, which then has to be checked against the actual rover.
+
+
+WHY THERE ARE TWO STACK NODES
+-----------------------------
+A blade is carried on a robotic hinge, and the stack node is how high up the blade that hinge grabs
+it -- which is what decides how far the blade DANGLES below the hinge arm.
+
+The bracket across the push arms sits in the bottom third, so a blade hung from it dangles only
+0.36 / 0.47 / 0.68 m. A hinge mounted high enough to clear the ground cannot reach down that far
+with its arm level: the arm has to be angled down, which tilts the blade with it, which then has to
+be rotated back by the same angle -- leaving a visible kink between the two parts, and two rotations
+to set up instead of none. Measured in game at 30 degrees on a BD-5.
+
+So the bracket grows upwards into a back plate carrying a SECOND node, which roughly doubles the
+dangle. The low node stays: it costs nothing, it is the one already on built vessels, and a blade
+slung under a low beam still wants it.
+
+The top node is as high as it can go. Both nodes sit at the centre of the plate that carries them,
+and that plate may not stick out above the blade -- the box collider is fitted to the mouldboard.
 """
 
 import bpy
@@ -58,6 +77,22 @@ EDGE_DROP = 0.0     # metres the cutting edge sits BELOW the attach point. See t
 PROFILE_STEPS = 15  # samples along the mouldboard profile, bottom to top
 EDGE_STEPS = 2      # how many of those belong to the cutting lip (its own object and material)
 UV_TILE = 1.0       # metres per texture repeat
+
+
+# How wide the back plate is, as a fraction of the bracket it grows out of. Full width reads as a
+# sheet bolted over the whole back of the blade -- rendered, it hid the mouldboard entirely.
+BACK_PLATE_WIDTH = 0.45
+
+# ...but the plate also has to COVER the hinge that plugs into it, or the hinge overhangs it on
+# every side. A hinge is the same size whatever the blade, so this is the one dimension that does
+# NOT scale with the width: it is a floor, applied on top of the fraction above.
+#
+# Measured off the stock G-11 (hinge_01.mu), reading its meshes with the local transforms composed
+# and taking the section across its attach plane -- NOT the naive bounding box, which the part's
+# offset inside the .mu makes meaningless. The G-00 is 0.26 x 0.21 m and fits well inside this; the
+# alligator hinges are far larger and were never the target.
+HINGE_FOOTPRINT = (0.782, 0.622)    # width x height, in metres
+HINGE_MARGIN = 0.03                 # how much plate shows around it on each side
 
 TEXTURE_FILE = "bulldozerBlade.png"
 FACE_EMPTY = "bladeFace"        # what the .cfg must put in bladeTransform
@@ -446,6 +481,9 @@ def build_blade(name, width, x_offset=0.0, livery_name=None):
     # Push arms and the bracket that spans them: what carries the blade back to the rover.
     arm_x = 0.27 * width
     aw, arm_z = dim["aw"], dim["arm_z"] + dz
+    top = max(max(front[1], back[1]) for front, back in section)   # highest point of the mouldboard
+    flange = 0.14 * h           # how far the bracket stands proud of the arms, above and below
+
     # The arms end on the mouldboard's back, following its curve, and start half way INTO the
     # bracket rather than flush with its back face -- flush would put the arm's rear cap in the
     # bracket's plane with the same normal, the z-fight described above.
@@ -455,8 +493,35 @@ def build_blade(name, width, x_offset=0.0, livery_name=None):
     # The bracket is also what a stack-attached beam butts against, so it is sized to give one
     # something to land on rather than just to tie the two arms together.
     bracket_x = arm_x + aw / 2 + 0.04
+    bracket_top = arm_z + aw + flange
     box(name + "Bracket", -bracket_x, bracket_x, 0.0, tp,
-        arm_z - 0.14 * h, arm_z + aw + 0.14 * h, root, steel)
+        arm_z - flange, bracket_top, root, steel)
+
+    # The back plate that carries the stack node (see the module docstring). It cannot be an open
+    # frame: the bracket already reaches within 0.15 m of it on a BD-5.
+    #
+    # Butted onto the bracket rather than sunk into it: the two share the y = 0 and y = tp planes,
+    # so any overlap would put two coplanar faces with the same normal against each other -- the
+    # flicker described above. Abutting leaves them edge to edge, which never z-fights.
+    #
+    # Sized as the LARGER of what the blade suggests and what the hinge needs, so a big blade keeps
+    # a plate in proportion while a small one is still big enough to sit behind the whole hinge.
+    # On a BD-2 and a BD-3 the plate ends up above the top edge of the mouldboard, which is why the
+    # collider below is fitted to the plate as well.
+    if bracket_top >= top:
+        raise SystemExit("%s: bracket already reaches the top edge, no room for a back plate" % name)
+    node_z = (bracket_top + top) / 2.0
+    plate_x = max(BACK_PLATE_WIDTH * bracket_x, HINGE_FOOTPRINT[0] / 2.0 + HINGE_MARGIN)
+    plate_top = max(top, node_z + HINGE_FOOTPRINT[1] / 2.0 + HINGE_MARGIN)
+    box(name + "BackPlate", -plate_x, plate_x, 0.0, tp, bracket_top, plate_top, root, steel)
+
+    # The hinge is centred on the node, so its lower half reaches BELOW the plate on the smaller
+    # blades -- where the bracket, which is wider still, is what stands behind it. Checked rather
+    # than eyeballed: a hinge overhanging into thin air is exactly the defect this plate fixes.
+    hinge_bottom = node_z - HINGE_FOOTPRINT[1] / 2.0 - HINGE_MARGIN
+    if hinge_bottom < arm_z - flange or bracket_x < HINGE_FOOTPRINT[0] / 2.0 + HINGE_MARGIN:
+        raise SystemExit("%s: the bracket does not cover the part of the hinge below the plate"
+                         % name)
 
     # What the blade faces. No rotation: an unrotated object's exported Unity forward is Blender +Y.
     face = bpy.data.objects.new(FACE_EMPTY, None)
@@ -472,7 +537,7 @@ def build_blade(name, width, x_offset=0.0, livery_name=None):
     # pins the rover, which is what forces the player to carry it on a robotic hinge.
     y_max = max(max(f[0] for f, _ in plate), max(ends))
     z_min = -EDGE_DROP
-    z_max = max(max(front[1], back[1]) for front, back in section)
+    z_max = max(top, plate_top)     # the back plate can stand above the mouldboard
     collider = bpy.data.objects.new(name + "Collider", None)
     collider.empty_display_type = "CUBE"
     bpy.context.collection.objects.link(collider)
@@ -487,7 +552,8 @@ def build_blade(name, width, x_offset=0.0, livery_name=None):
         "width": width,
         "height": h,
         "depth": y_max,
-        "stack_node_y": arm_z + aw / 2.0,   # centre of the bracket, in Unity's up axis
+        "plate": (2.0 * plate_x, plate_top - bracket_top),
+        "top_stack_node_y": node_z,     # in Unity's up axis
         "unity_bounds": ((-half, half), (z_min, z_max), (0.0, y_max)),
     }
 
@@ -502,14 +568,15 @@ def clear_scene():
             collection.remove(item, do_unlink=True)
 
 
+def cli_args():
+    """Everything given after '--' on the Blender command line."""
+    return sys.argv[sys.argv.index("--") + 1:] if "--" in sys.argv else []
+
+
 def out_dir():
-    """The directory given after '--', or None when the script was run without one."""
-    if "--" not in sys.argv:
-        return None
-    args = sys.argv[sys.argv.index("--") + 1:]
-    if "--out" in args:
-        return os.path.abspath(args[args.index("--out") + 1])
-    return None
+    """The directory given after '--out', or None when the script was run without one."""
+    args = cli_args()
+    return os.path.abspath(args[args.index("--out") + 1]) if "--out" in args else None
 
 
 def variants_cfg(name, indent=""):
@@ -585,10 +652,14 @@ def main():
         print("    cfg lines:")
         print("        MODEL { model = BulldozerMod/Parts/%s }" % r["name"])
         print("        node_attach = 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 1")
-        print("        node_stack_back = 0.0, %.4f, 0.0, 0.0, 0.0, -1.0, 1" % r["stack_node_y"])
+        print("        node_stack_backTop = 0.0, %.4f, 0.0, 0.0, 0.0, -1.0, 1"
+              % r["top_stack_node_y"])
         print("        attachRules = 1,1,0,0,1")
         print("        bladeTransform = %s   (inside the MODULE node)" % FACE_EMPTY)
-        print("        (stack node sits %.2f m above the cutting edge)" % r["stack_node_y"])
+        print("        (dangles %.2f m below the node; back plate %.2f x %.2f m, backing a"
+              " %.2f x %.2f hinge together with the bracket below it)"
+              % (r["top_stack_node_y"], r["plate"][0], r["plate"][1],
+                 HINGE_FOOTPRINT[0], HINGE_FOOTPRINT[1]))
         for line in variants_cfg(r["name"], indent="        "):
             print(line)
         if "path" in r:

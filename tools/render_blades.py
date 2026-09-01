@@ -5,6 +5,7 @@ Renders the three bulldozer blades to PNG, for looking at the shapes without ope
     blender --background --python tools/render_blades.py
     blender --background --python tools/render_blades.py -- --out somewhere --width 1400
     blender --background --python tools/render_blades.py -- --livery Stainless
+    blender --background --python tools/render_blades.py -- --blade Mk3
 
 Writes one image per view and per livery into tools/renders by default. It builds the geometry AND
 takes the liveries by importing make_blades.py, so what it shows is always what the generator
@@ -28,6 +29,18 @@ GAP = 0.8           # metres of clear ground between two blades in the line-up
 MARGIN = 1.10       # how much wider than the geometry the frame is
 SENSOR = 36.0       # Blender's default sensor width, in mm
 
+# A stand-in for the G-11 hinge, at its real size, plus the level arm behind it and the ground the
+# blade is standing on. Together they answer the two questions the back plate exists for: with the
+# arm horizontal, does the cutting edge reach the ground, and is the hinge fully backed by plate
+# and bracket rather than overhanging into air? None of it is exported -- it is drawn straight into
+# the preview scene, and it takes its section from the generator so the two cannot drift apart.
+HINGE_DEPTH = 0.625     # how far the G-11 stands off what it is bolted to, in metres
+ARM_LENGTH = 1.0        # the level arm drawn behind it
+ARM_SECTION = 0.22
+HINGE_TINT = ((0.42, 0.22, 0.06), (0.20, 0.20, 0.20), 0.20)
+ARM_TINT = ((0.28, 0.15, 0.04), (0.20, 0.20, 0.20), 0.20)
+GROUND_TINT = ((0.16, 0.15, 0.14), (0.05, 0.05, 0.05), 0.05)
+
 # Where each camera stands, in the same metres as the models. Only the position is given: where it
 # points and how long a lens it takes are FITTED to the geometry (see aim_and_fit), so these views
 # survive a change to the shape constants in make_blades.py instead of quietly going off-frame --
@@ -41,6 +54,15 @@ VIEWS = {
     "back": (7.5, -15.0, 6.5),      # push arms and mounting bracket
 }
 
+# Straight-on profile, on the X axis with no elevation: the view that shows how high up the blade
+# the stack node sits and whether the mock hinge arm leaves it square. Only usable one blade at a
+# time -- the line-up runs along X, so from here the three would sit on top of each other.
+SOLO_VIEW = {
+    "profile": (16.0, 0.0, 0.9),
+    # Low and close behind, where the hinge would be: the arms, the bracket and the beam together.
+    "rear34": (6.0, -9.0, 2.2),
+}
+
 
 def load_generator():
     """Import make_blades.py as a module, without running its export."""
@@ -50,16 +72,36 @@ def load_generator():
     return module
 
 
-def build_lineup(gen, livery_name=None):
-    """Build the three blades side by side and return every mesh corner, in world space."""
+def mock_hinge(gen, root, width, report):
+    """Draw a G-11-sized hinge, and a level arm behind it, plugged into the blade's stack node."""
+    node_z = report["top_stack_node_y"]
+    w, h = gen.HINGE_FOOTPRINT
+    name = report["name"]
+    # Starting at y = 0, the plate's back face, which is where a stack-attached part lands.
+    gen.box(name + "Hinge", -w / 2.0, w / 2.0, -HINGE_DEPTH, 0.0, node_z - h / 2.0, node_z + h / 2.0,
+            root, gen.ksp_material(name + "Hinge", HINGE_TINT))
+    half = ARM_SECTION / 2.0
+    gen.box(name + "Arm", -half, half, -HINGE_DEPTH - ARM_LENGTH, -HINGE_DEPTH,
+            node_z - half, node_z + half, root, gen.ksp_material(name + "Arm", ARM_TINT))
+
+
+def ground(gen, extent):
+    """Lay a plane at z = 0 -- where the model's lowest point sits -- so the blades read as posed."""
+    material = gen.ksp_material("Ground", GROUND_TINT)
+    gen.box("Ground", -extent, extent, -extent, extent, -0.02, 0.0, None, material)
+
+
+def build_lineup(gen, livery_name=None, blades=None):
+    """Build the blades side by side and return every mesh corner, in world space."""
     gen.clear_scene()
 
     # Laid out edge to edge rather than on a fixed pitch: the widths differ by more than a factor of
     # two, so a fixed pitch either overlaps the big one or strands the small one.
     x = 0.0
-    for name, width in gen.BLADES:
+    for name, width in (blades or gen.BLADES):
         x += width / 2.0
-        gen.build_blade(name, width, x, livery_name)
+        root, report = gen.build_blade(name, width, x, livery_name)
+        mock_hinge(gen, root, width, report)
         x += width / 2.0 + GAP
 
     bpy.context.view_layer.update()     # parenting only lands in matrix_world after this
@@ -69,6 +111,10 @@ def build_lineup(gen, livery_name=None):
             continue
         for corner in obj.bound_box:
             points.append(obj.matrix_world @ Vector(corner))
+
+    # After the corners are collected, so the frame stays fitted to the blades rather than to a
+    # plane that has to be far bigger than them to read as ground.
+    ground(gen, 4.0 * x)
     return points
 
 
@@ -144,13 +190,13 @@ def setup_scene(width_px):
     return scene
 
 
-def render(scene, points, view, path):
+def render(scene, points, view, path, views=VIEWS):
     """Render one named view of the current scene to the given path."""
     cam_data = bpy.data.cameras.new("Cam")
     cam = bpy.data.objects.new("Cam", cam_data)
     scene.collection.objects.link(cam)
     scene.camera = cam
-    cam.location = VIEWS[view]
+    cam.location = views[view]
 
     aspect = scene.render.resolution_x / scene.render.resolution_y
     cam_data.lens = aim_and_fit(cam, points, aspect)
@@ -170,14 +216,24 @@ def parse_args():
     out = args[args.index("--out") + 1] if "--out" in args else os.path.join(HERE, "renders")
     width = int(args[args.index("--width") + 1]) if "--width" in args else 1400
     livery = args[args.index("--livery") + 1] if "--livery" in args else None
-    return os.path.abspath(out), width, livery
+    blade = args[args.index("--blade") + 1] if "--blade" in args else None
+    return os.path.abspath(out), width, livery, blade
 
 
 def main():
-    out, width, livery = parse_args()
+    out, width, livery, blade = parse_args()
     os.makedirs(out, exist_ok=True)
 
     gen = load_generator()
+
+    # One named blade, or all three. The straight-on profile only makes sense for a single one.
+    blades = [entry for entry in gen.BLADES if blade is None or entry[0].endswith(blade)]
+    if not blades:
+        raise SystemExit("no blade matching %r in %s" % (blade, [e[0] for e in gen.BLADES]))
+    views = dict(VIEWS)
+    if len(blades) == 1:
+        views.update(SOLO_VIEW)
+    suffix = "" if blade is None else "_" + blades[0][0][-3:].lower()
 
     # Every livery unless one is named. They differ only in paint, so this is the only way to see a
     # .cfg-only livery at all -- it exists nowhere in the .mu, and otherwise only shows up in game.
@@ -187,11 +243,12 @@ def main():
     for livery_name in liveries:
         # Lights and world go up AFTER the blades: build_lineup starts by emptying the scene, which
         # would take them with it.
-        points = build_lineup(gen, livery_name)
+        points = build_lineup(gen, livery_name, blades)
         scene = setup_scene(width)
-        for view in VIEWS:
-            path = os.path.join(out, "blades_%s_%s.png" % (view, livery_name.lower()))
-            lens = render(scene, points, view, path)
+        for view in views:
+            path = os.path.join(out, "blades_%s%s_%s.png"
+                                % (view, suffix, livery_name.lower()))
+            lens = render(scene, points, view, path, views)
             print("rendered %s  (fitted lens %.0f mm)" % (path, lens))
 
 
