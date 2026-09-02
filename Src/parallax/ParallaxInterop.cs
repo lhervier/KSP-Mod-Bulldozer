@@ -29,23 +29,44 @@ namespace com.github.lhervier.ksp.bulldozermod.parallax
         private const string ParallaxKspName = "Parallax";
         private const string ParallaxDllName = "ParallaxContinued";
 
+        // Answered once per KSP session, then cached. The answer cannot change while the game runs (KSP
+        // builds its assembly list at startup and never adds to it), and the scan is not free: it walks
+        // 100 to 400 entries, through IEnumerable<LoadedAssembly>, so each call boxed an enumerator. That
+        // was the mod's only permanent per-frame garbage, since a blade tests this in every OnUpdate.
+        private static bool? _available;
+
         /// <summary>
         /// True when ParallaxContinued is loaded. Checked through KSP's assembly list rather than by touching
         /// a Parallax type, so callers can test this safely even when the mod is absent.
+        ///
+        /// In practice always true: [KSPAssemblyDependency("Parallax")] means KSP discards this mod outright
+        /// when Parallax is missing. The guard is kept as a belt-and-braces measure.
         /// </summary>
         public static bool Available
         {
             get
             {
-                foreach (AssemblyLoader.LoadedAssembly assembly in AssemblyLoader.loadedAssemblies)
+                if (!_available.HasValue)
                 {
-                    if (assembly.name == ParallaxKspName || assembly.dllName == ParallaxDllName)
-                    {
-                        return true;
-                    }
+                    _available = Scan();
                 }
-                return false;
+                return _available.Value;
             }
+        }
+
+        /// <summary>
+        /// Looks ParallaxContinued up in KSP's assembly list.
+        /// </summary>
+        private static bool Scan()
+        {
+            foreach (AssemblyLoader.LoadedAssembly assembly in AssemblyLoader.loadedAssemblies)
+            {
+                if (assembly.name == ParallaxKspName || assembly.dllName == ParallaxDllName)
+                {
+                    return true;
+                }
+            }
+            return false;
         }
 
         /// <summary>
