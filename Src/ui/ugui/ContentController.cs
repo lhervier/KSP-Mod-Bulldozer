@@ -52,6 +52,12 @@ namespace com.github.lhervier.ksp.bulldozermod.ui.ugui
                 _logLevelCombo.SetOptions(LogLevels.Names, _viewModel.LogLevel.ToString());
                 _logLevelCombo.OnSelect.Add(OnLogLevelSelected);
             }
+            // The combo does not select on its own click, on purpose: what it displays comes back from
+            // the setting, so a value the view model refuses is never shown as chosen.
+            if (_viewModel != null)
+            {
+                _viewModel.OnLogLevelChanged.Add(OnLogLevelChanged);
+            }
         }
 
         public void OnDestroy()
@@ -67,6 +73,10 @@ namespace com.github.lhervier.ksp.bulldozermod.ui.ugui
             if (_logLevelCombo != null)
             {
                 _logLevelCombo.OnSelect.Remove(OnLogLevelSelected);
+            }
+            if (_viewModel != null)
+            {
+                _viewModel.OnLogLevelChanged.Remove(OnLogLevelChanged);
             }
         }
 
@@ -104,6 +114,15 @@ namespace com.github.lhervier.ksp.bulldozermod.ui.ugui
             if (Enum.TryParse(value, out level))
             {
                 _viewModel.LogLevel = level;
+            }
+        }
+
+        // Instance method, not static: EventVoid.Add dereferences the delegate's target.
+        private void OnLogLevelChanged()
+        {
+            if (_logLevelCombo != null)
+            {
+                _logLevelCombo.Select(_viewModel.LogLevel.ToString());
             }
         }
     }
