@@ -1,4 +1,4 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using UnityEngine;
 using com.github.lhervier.ksp.shared;
 using com.github.lhervier.ksp.bulldozermod.terrain;
@@ -42,7 +42,12 @@ namespace com.github.lhervier.ksp.bulldozermod.parallax
         // The trace is rebuilt from raycasts, so it is not free; it is also useless to rebuild it while
         // nothing moves. Both apply: at most one rebuild per interval, and only when the strip has actually
         // shifted - plus a slow refresh so a quad rebuilt underneath us eventually shows.
-        private const float RebuildInterval = 0.1f;
+        //
+        // The interval is the only real lever on that cost: a rebuild probes every cell corner, and each
+        // corner costs one GetSurfaceHeight - which replays the whole PQSMod chain of the body, the most
+        // expensive call of the PQS API - plus up to four raycasts. At 0.1 s a moving rover paid that ten
+        // times a second; 0.25 s divides the bill by 2.5 for a preview that still reads as live.
+        private const float RebuildInterval = 0.25f;
         private const float MaxAge = 2f;
         private const double MoveTolerance = 0.5;
 
