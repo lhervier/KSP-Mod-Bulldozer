@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Text;
 using UnityEngine;
 using Parallax;
 using Parallax.PQS_Mods;
@@ -9,57 +10,27 @@ using com.github.lhervier.ksp.bulldozermod.utils;
 namespace com.github.lhervier.ksp.bulldozermod.diagnostics
 {
     /// <summary>
-    /// On-screen readout of the leaf quads around the vessel, to position it on a quad edge or corner.
+    /// The leaf quads around the vessel, as a block of text — what the debug window displays to let the
+    /// player park on a quad edge or corner.
     ///
     /// Reading it: the distances are vessel-to-quad-CENTER. Two equal distances mean the vessel is on the
     /// edge between those two quads; four equal distances mean it is on the corner where four quads meet.
     /// The "impacted" count is how many decals a clean would create right now — the number to watch when
     /// testing a clean that straddles quads.
     ///
-    /// Toggle with MOD+B (right-shift on Windows). Temporary, to be removed once the mechanism is settled.
+    /// Kept in English, like the log dumps of <see cref="BandDiagnostic"/> and unlike the window around it:
+    /// this is a developer readout, and half of its words (half-diag, spread) name things this project only
+    /// ever names in English.
     /// </summary>
-    [KSPAddon(KSPAddon.Startup.Flight, false)]
-    public class QuadOverlay : MonoBehaviour
+    public class QuadReadout
     {
-        private const float RefreshInterval = 0.25f;
+        // Reused across refreshes rather than rebuilt: the window rebuilds this text twice a second for as
+        // long as it stays open.
+        private readonly List<KeyValuePair<PQ, double>> _ranked = new List<KeyValuePair<PQ, double>>();
+        private readonly StringBuilder _sb = new StringBuilder();
 
-        private bool _visible;
-        private float _nextRefresh;
-        private string _text = "";
-        private Rect _window = new Rect(60f, 120f, 340f, 0f);
-
-        private void Update()
-        {
-            if (GameSettings.MODIFIER_KEY.GetKey() && Input.GetKeyDown(KeyCode.B))
-            {
-                _visible = !_visible;
-            }
-            if (!_visible || Time.time < _nextRefresh)
-            {
-                return;
-            }
-            _nextRefresh = Time.time + RefreshInterval;
-            _text = BuildText();
-        }
-
-        private void OnGUI()
-        {
-            if (!_visible)
-            {
-                return;
-            }
-            GUI.skin = HighLogic.Skin;
-            _window = GUILayout.Window(GetInstanceID(), _window, DrawWindow, "Bulldozer — quads",
-                                       GUILayout.Width(340f));
-        }
-
-        private void DrawWindow(int id)
-        {
-            GUILayout.Label(_text);
-            GUI.DragWindow();
-        }
-
-        private string BuildText()
+        /// <summary>Builds the readout for the active vessel. Never null; says so when there is nothing to report.</summary>
+        public string Build()
         {
             Vessel vessel = FlightGlobals.ActiveVessel;
             if (vessel == null || vessel.mainBody?.pqsController == null)
@@ -71,7 +42,7 @@ namespace com.github.lhervier.ksp.bulldozermod.diagnostics
             PQS sphere = body.pqsController;
             Vector3d vesselDir = body.GetRelSurfaceNVector(vessel.latitude, vessel.longitude);
 
-            List<KeyValuePair<PQ, double>> ranked = new List<KeyValuePair<PQ, double>>();
+            _ranked.Clear();
             foreach (KeyValuePair<PQ, ScatterSystemQuadData> entry in ScatterComponent.scatterQuadData)
             {
                 PQ quad = entry.Key;
@@ -80,34 +51,34 @@ namespace com.github.lhervier.ksp.bulldozermod.diagnostics
                     continue;
                 }
                 double dist = MathUtils.AngleBetween(quad.positionPlanetRelative, vesselDir) * body.Radius;
-                ranked.Add(new KeyValuePair<PQ, double>(quad, dist));
+                _ranked.Add(new KeyValuePair<PQ, double>(quad, dist));
             }
-            ranked.Sort((a, b) => a.Value.CompareTo(b.Value));
+            _ranked.Sort((a, b) => a.Value.CompareTo(b.Value));
 
-            System.Text.StringBuilder sb = new System.Text.StringBuilder();
-            sb.AppendLine($"{body.name}  maxLevel={sphere.maxLevel}");
+            _sb.Length = 0;
+            _sb.AppendLine($"{body.name}  maxLevel={sphere.maxLevel}");
 
-            if (ranked.Count == 0)
+            if (_ranked.Count == 0)
             {
-                sb.AppendLine("no leaf quad tracked here");
-                return sb.ToString();
+                _sb.AppendLine("no leaf quad tracked here");
+                return _sb.ToString();
             }
 
-            sb.AppendLine("distance to quad centers:");
-            int shown = Mathf.Min(4, ranked.Count);
+            _sb.AppendLine("distance to quad centers:");
+            int shown = Mathf.Min(4, _ranked.Count);
             for (int i = 0; i < shown; i++)
             {
-                PQ quad = ranked[i].Key;
+                PQ quad = _ranked[i].Key;
                 PQSMod_MapDecalVertexRemoveScatter owner;
                 PQSMod_MapDecalVertexRemoveScatter.maskedScattersPerQuad.TryGetValue(quad, out owner);
                 string ownerName = owner == null ? "free" : owner.gameObject.name;
-                sb.AppendLine($"  #{i}  {ranked[i].Value,7:F1} m   {ownerName}");
+                _sb.AppendLine($"  #{i}  {_ranked[i].Value,7:F1} m   {ownerName}");
             }
 
             // Equal distances are the signal: 2 for an edge, 4 for a corner.
-            double spread = ranked[shown - 1].Value - ranked[0].Value;
-            sb.AppendLine("");
-            sb.AppendLine($"spread over {shown}: {spread:F1} m");
+            double spread = _ranked[shown - 1].Value - _ranked[0].Value;
+            _sb.AppendLine("");
+            _sb.AppendLine($"spread over {shown}: {spread:F1} m");
 
             // The pass the previewed blade currently offers, so this line answers "what would a click do
             // HERE". It needs a blade to read: with no preview running there is no strip to report on, and
@@ -125,18 +96,18 @@ namespace com.github.lhervier.ksp.bulldozermod.diagnostics
             // grows towards the edges of a cube face (1.41x at 45 deg). The two half-diagonals expose the
             // skew on top of that: they are equal only where the quad is a true rectangle.
             QuadMetrics.QuadShape shape;
-            if (QuadMetrics.TryMeasureShape(body, ranked[0].Key, out shape))
+            if (QuadMetrics.TryMeasureShape(body, _ranked[0].Key, out shape))
             {
-                sb.AppendLine($"sides {shape.sideA:F0} x {shape.sideB:F0} m " +
-                              $"(nominal {QuadMetrics.NominalQuadEdge(sphere):F0} m)");
-                sb.AppendLine($"half-diag {shape.halfDiagonalMin:F0} .. {shape.halfDiagonalMax:F0} m");
+                _sb.AppendLine($"sides {shape.sideA:F0} x {shape.sideB:F0} m " +
+                               $"(nominal {QuadMetrics.NominalQuadEdge(sphere):F0} m)");
+                _sb.AppendLine($"half-diag {shape.halfDiagonalMin:F0} .. {shape.halfDiagonalMax:F0} m");
             }
             else
             {
-                sb.AppendLine($"shape not measurable (nominal {QuadMetrics.NominalQuadEdge(sphere):F0} m)");
+                _sb.AppendLine($"shape not measurable (nominal {QuadMetrics.NominalQuadEdge(sphere):F0} m)");
             }
 
-            sb.AppendLine(blade == null
+            _sb.AppendLine(blade == null
                 ? "no blade previewing: switch a blade's preview on to see what a pass would touch"
                 : aimed
                     ? $"a {band.length:F0} x {band.width:F0} m pass here would touch " +
@@ -164,10 +135,10 @@ namespace com.github.lhervier.ksp.bulldozermod.diagnostics
                 }
 
                 int px = ScatterMask.SizeFor(biggest);
-                sb.AppendLine($"largest mask {px}px over {2.0 * biggest:F0} m " +
-                              $"({2.0 * biggest / px:F2} m/px), {kilobytes} Ko total");
+                _sb.AppendLine($"largest mask {px}px over {2.0 * biggest:F0} m " +
+                               $"({2.0 * biggest / px:F2} m/px), {kilobytes} Ko total");
             }
-            return sb.ToString();
+            return _sb.ToString();
         }
     }
 }

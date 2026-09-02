@@ -78,10 +78,6 @@
       <HintPath>$(KSP_DATA_DIR)\Managed\UnityEngine.ImageConversionModule.dll</HintPath>
       <Private>false</Private>
     </Reference>
-    <Reference Include="UnityEngine.IMGUIModule">
-      <HintPath>$(KSP_DATA_DIR)\Managed\UnityEngine.IMGUIModule.dll</HintPath>
-      <Private>false</Private>
-    </Reference>
     <Reference Include="UnityEngine.AnimationModule">
       <HintPath>$(KSP_DATA_DIR)\Managed\UnityEngine.AnimationModule.dll</HintPath>
       <Private>false</Private>
