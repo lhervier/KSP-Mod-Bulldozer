@@ -24,6 +24,10 @@ namespace com.github.lhervier.ksp.bulldozermod.parallax
     /// A cell is drawn by exactly one quad, the one that owns it (<see cref="QuadLocator.Contains"/>).
     /// Masks overlap by design, so drawing every mask's copy would double the alpha along every seam.
     ///
+    /// Cells falling on a quad another mod's decal already owns are drawn in a SECOND colour rather than
+    /// left out. The PAW already says a reservation is in the way; what it cannot say is WHERE it starts,
+    /// and that is what decides how far the rover has to be moved — a 200 m pass spans four quads or more.
+    ///
     /// The geometry itself belongs to <see cref="GroundSheet"/>, shared with the cleaned-zone overlay: what
     /// is proper to this class is WHICH cells to draw, and when to measure them again.
     /// </summary>
@@ -49,10 +53,30 @@ namespace com.github.lhervier.ksp.bulldozermod.parallax
         // over a whole strip rather than on scattered rocks.
         private static readonly Color TraceColor = new Color(1f, 0.15f, 0.1f, 0.35f);
 
+        // The stretch of strip lying on a quad another mod has reserved: nothing will be cleared there.
+        // Amber, and more opaque than the trace, so it reads as "this part is dead" rather than "this part
+        // is slightly redder".
+        //
+        // Amber rather than the two obvious candidates, and the reason is the shader: the one we land on is
+        // LIT, so everything dims with the ground it lies on. A GREY or dark overlay is then worst exactly
+        // where it is tested — grey regolith on the Mun — and vanishes on the night side; a BRIGHTER RED is
+        // told apart from the trace by intensity alone, which is what dimming takes away first. A hue this
+        // far from red survives both, and is absent from Mun grey, Kerbin green and Eve purple alike.
+        //
+        // Never yet seen in flight (nor has the trace itself): if amber does not read on some body, this is
+        // the one line to change.
+        private static readonly Color BlockedColor = new Color(1f, 0.78f, 0f, 0.45f);
+
         // Static, and never destroyed: same reasoning as the highlight's material.
         private static Material _material;
+        private static Material _blockedMaterial;
 
+        // Two sheets because a sheet is drawn through ONE material, and the shader in use carries no vertex
+        // colour. They cost next to nothing side by side: their buffers grow on demand, a quad goes into
+        // exactly one of them, and corner raycasts are shared within a quad — so the pair measures the very
+        // same points, and the same number of them, that a single sheet measures when nothing is reserved.
         private readonly GroundSheet _sheet = new GroundSheet(MaxCells);
+        private readonly GroundSheet _blockedSheet = new GroundSheet(MaxCells);
 
         private CelestialBody _body;
         private SurfaceBand _band;
@@ -82,12 +106,14 @@ namespace com.github.lhervier.ksp.bulldozermod.parallax
                 Rebuild(body, band);
             }
             _sheet.Draw(camera, material);
+            _blockedSheet.Draw(camera, BlockedMaterial());
         }
 
         /// <summary>Releases the mesh. The material is shared and deliberately outlives the scene.</summary>
         public void Dispose()
         {
             _sheet.Dispose();
+            _blockedSheet.Dispose();
             _built = false;
         }
 
@@ -127,26 +153,28 @@ namespace com.github.lhervier.ksp.bulldozermod.parallax
 
             // The anchor only keeps the vertices small; the sheet follows the ground raycast by raycast.
             double surface = body.pqsController.GetSurfaceHeight(band.origin) - body.Radius;
-            _sheet.Begin(body, band.Middle * (body.Radius + surface));
+            // Both anchored on the same point, so the two meshes are measured and drawn in one frame.
+            Vector3d anchor = band.Middle * (body.Radius + surface);
+            _sheet.Begin(body, anchor);
+            _blockedSheet.Begin(body, anchor);
 
             List<QuadRef> quads = QuadLocator.FindImpactedQuads(body, band);
             for (int i = 0; i < quads.Count; i++)
             {
                 // A quad another mod's decal already owns can never take ours: nothing would be cleared
-                // there, so nothing is painted. Silently, which is exactly why it has to show (near the KSC,
-                // ParallaxMaskKSC).
-                if (quads[i].ForeignOwner != null)
-                {
-                    continue;
-                }
-                AddQuad(body, band, quads[i]);
+                // there. Painted in its own colour rather than skipped, because a gap in the strip is
+                // indistinguishable from a bug — and near the KSC (ParallaxMaskKSC) that gap is the answer.
+                AddQuad(body, band, quads[i],
+                        quads[i].ForeignOwner != null ? _blockedSheet : _sheet);
             }
 
             _sheet.End();
+            _blockedSheet.End();
         }
 
-        // Every cell of ONE quad's mask that the strip clears and that this quad owns.
-        private void AddQuad(CelestialBody body, SurfaceBand band, QuadRef quad)
+        // Every cell of ONE quad's mask that the strip clears and that this quad owns, into the sheet that
+        // carries the colour this quad is to be drawn in.
+        private void AddQuad(CelestialBody body, SurfaceBand band, QuadRef quad, GroundSheet sheet)
         {
             BandRaster raster = ScatterCleaner.RasterFor(body, quad.direction, quad.halfDiagonal, band);
 
@@ -155,7 +183,7 @@ namespace com.github.lhervier.ksp.bulldozermod.parallax
             {
                 return;
             }
-            _sheet.BeginQuad(raster.Projection, minX, minY, maxX, maxY);
+            sheet.BeginQuad(raster.Projection, minX, minY, maxX, maxY);
 
             for (int y = minY; y <= maxY; y++)
             {
@@ -169,7 +197,7 @@ namespace com.github.lhervier.ksp.bulldozermod.parallax
                     {
                         continue;
                     }
-                    if (!_sheet.AddCell(x, y))
+                    if (!sheet.AddCell(x, y))
                     {
                         if (!_warnedCap)
                         {
@@ -190,6 +218,15 @@ namespace com.github.lhervier.ksp.bulldozermod.parallax
                 _material = OverlayMaterial.Create(TraceColor, "Ground trace");
             }
             return _material;
+        }
+
+        private static Material BlockedMaterial()
+        {
+            if (_blockedMaterial == null)
+            {
+                _blockedMaterial = OverlayMaterial.Create(BlockedColor, "Ground trace (reserved)");
+            }
+            return _blockedMaterial;
         }
     }
 }
