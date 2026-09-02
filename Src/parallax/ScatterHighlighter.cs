@@ -88,6 +88,10 @@ namespace com.github.lhervier.ksp.bulldozermod.parallax
         private bool _warnedNoRegistry;
         private int _lastShown = -1;
         private int _lastTotal = -1;
+
+        // Rate limit of the per-frame count line below.
+        private const float CountLogPeriod = 1f;
+        private float _nextCountLog;
         private int[] _loaded;
         private int[] _shown;
 
@@ -104,6 +108,7 @@ namespace com.github.lhervier.ksp.bulldozermod.parallax
                 _warnedNoRegistry = false;
                 _lastShown = -1;
                 _lastTotal = -1;
+                _nextCountLog = 0f;
                 _trace.Dispose();
                 return;
             }
@@ -319,12 +324,18 @@ namespace com.github.lhervier.ksp.bulldozermod.parallax
                 LogSummary(body, blade, shown, total);
                 _summaryLogged = true;
             }
-            else if (shown != _lastShown || total != _lastTotal)
+            else if ((shown != _lastShown || total != _lastTotal) && Time.unscaledTime >= _nextCountLog)
             {
-                // Only on change: silent while parked, one line per step while driving. This is what tells
-                // "nothing is under the strip" (total > 0) apart from "Parallax has loaded nothing around
-                // here at all" (total == 0) — the two look identical on screen.
-                LOGGER.LogInfo($"Highlighting {shown} of {total} collideable instance(s)");
+                // This is what tells "nothing is under the strip" (total > 0) apart from "Parallax has
+                // loaded nothing around here at all" (total == 0) — the two look identical on screen.
+                //
+                // Trace, and at most once a second. `total` counts the instances walked, which depends on
+                // the vessel's position: while driving it changes on nearly EVERY frame, so an on-change
+                // test alone left a Debug.Log — stack trace captured, line written to KSP.log — in the
+                // per-frame path of the mod's most expensive mode. The change test is kept on top of the
+                // throttle so a parked vessel stays silent.
+                LOGGER.LogTrace($"Highlighting {shown} of {total} collideable instance(s)");
+                _nextCountLog = Time.unscaledTime + CountLogPeriod;
             }
             _lastShown = shown;
             _lastTotal = total;
