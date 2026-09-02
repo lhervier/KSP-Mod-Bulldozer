@@ -384,8 +384,7 @@ Le squelette de persistance et d'application « à froid » a été conservé ; 
 | `Src/Mod.cs` | L'addon de démarrage (`PSystemSpawn`, une fois par session) : il ne fait qu'appliquer le **niveau de log** persisté, avant que quoi que ce soit ait logué |
 | `tools/create_icon.ps1` | Génère `GameData/BulldozerMod/icon.png` (38 px, silhouette blanche sur fond transparent, au style des mods frères). Produit de build : ne pas retoucher le PNG, relancer le script |
 | `Src/diagnostics/QuadOverlay.cs` | **Outil de test** : affichage en vol des quads voisins (MOD+B) — voir ci-dessous |
-| `Src/diagnostics/BulldozerScatterDiagnostic.cs` | **Outil de test** : dump complet de la chaîne dans `KSP.log`, 8 s après l'entrée en vol |
-| `Src/diagnostics/BandDiagnostic.cs` | **Outil de test** (entrée PAW « Analyser la passe ») : dump lecture seule de tout ce qu'une passe déciderait. Conçu pour séparer trois pannes qui se ressemblent à l'écran — projection fausse, familles non surlignables, ou simplement une lame étroite face à des grappes. C'est lui qui a prouvé la visée (§5) et permis de chiffrer le bug du cap |
+| `Src/diagnostics/BandDiagnostic.cs` | **Outil de test** (entrée PAW « Analyser la passe ») : dump lecture seule de tout ce qu'une passe déciderait. Conçu pour séparer quatre pannes qui se ressemblent à l'écran — projection fausse, familles non surlignables, une lame étroite face à des grappes, ou un decal que Parallax n'a jamais câblé. C'est lui qui a prouvé la visée (§5) et permis de chiffrer le bug du cap |
 
 ### Se placer sur une limite de quad (`QuadOverlay`)
 
@@ -398,6 +397,21 @@ Ouvert avec **MOD+B** en vol (MOD = shift droit sous Windows). Il liste les **4 
 La dernière ligne annonce combien de quads la passe de la **lame en aperçu** toucherait à cet endroit : c'est le nombre de decals qui seraient créés, donc la valeur à surveiller pour tester une passe à cheval. Sans aperçu actif, il n'y a pas de passe à décrire et la ligne le dit — allumer la prévisualisation d'une lame.
 
 **Supprimés** : `BulldozerFlattenMod` (le PQSMod de nivellement), `TerrainLeveler`, `BulldozerPlugin` (bouton toolbar, remplacé par le PAW) et `BulldozerDiagnosticPlugin` (dump d'altitudes mesh vs analytique, sans objet maintenant).
+
+### Un seul diagnostic, à la demande (2026-09-02)
+
+`BulldozerScatterDiagnostic` — un `KSPAddon` de vol qui dumpait la chaîne 8 s après **chaque** entrée en vol — est **supprimé**, et ses deux sections irremplaçables sont devenues une section de `BandDiagnostic` (`DumpWiring`).
+
+**Ce qu'il coûtait** : sa coroutine partait **sans condition**, en partie normale, et son dump est écrit en `LogInfo` — donc visible au niveau par défaut. Un tri de tout `ScatterComponent.scatterQuadData` et ~14 lignes de log à chaque chargement de vol, pour un outil que le joueur n'a pas demandé, alors que l'autre diagnostic sait déjà se cacher derrière une case à cocher.
+
+**Ce qu'il fallait sauver, et pourquoi le reste du dump ne le remplace pas.** Tout le reste de `BandDiagnostic` est **notre propre arithmétique rejouée** — la ligne `owner=`, le raster, les verdicts d'instances. Ils sont d'accord entre eux par construction, donc ils ne peuvent pas attraper la panne où le decal est attaché, le masque est bon, et les cailloux restent quand même. Deux lignes seules lisent l'état du **jeu** :
+
+- **`readBlockMap` par famille** — la preuve que *Parallax* a câblé notre masque dans les données de scatters du quad. C'est la ligne que le §5 cite comme preuve de la chaîne ;
+- **le quad absent du registre** — `FindImpactedQuads` parcourt ce même registre, donc un quad manquant **sort de la liste sans un mot**. Il se lit ici comme un quad le plus proche plus loin qu'une demi-diagonale, exactement le cas de nettoyage partiel resté ouvert en §5.
+
+**Ce qui a été abandonné au passage**, parce que déjà couvert : le classement des quads voisins et la mesure de forme (c'est `QuadOverlay`, MOD+B, sur la même source) ; la liste des quads enregistrés (c'est le vert de `CleanedZonesOverlay`) ; et le test « ce quad passerait-il l'inclusion maintenant ? », outil de l'enquête `Acos`→NaN (PIÈGE 1, corrigé depuis dans notre sous-classe, et dont `owner=` répond à la même question).
+
+⚠️ **Le réflexe à ne pas avoir** : remettre un addon de vol pour rejouer ce dump automatiquement après un rechargement. Ce que ça achèterait — ne pas cliquer — ne vaut pas une coroutine dans chaque partie ; la passe qui vient d'être appliquée a laissé une lame sur le rover, donc l'entrée PAW est toujours à portée.
 
 Acquis transverses conservés : le `ScenarioModule` est la **source de vérité par save** (les corps sont `DontDestroyOnLoad` → une injection runtime **fuit entre parties** sans purge) ; on **n'agit jamais sur un PQS vivant**, on injecte pendant l'écran de chargement, vaisseau *packed* ; on ne **repositionne jamais** un vaisseau en physique active.
 
@@ -783,7 +797,7 @@ Le mécanisme et ses pièges (`materialName` apparié en `StartsWith`, `themeNam
   ⚠️ **Rien de tout ça n'a encore été vu en jeu** — ni la fenêtre, ni le vert, ni le tracé rouge qu'il partage désormais.
 
 - ✅ **Viser à l'aveugle — fait le 2026-08-31** (`Src/parallax/BandTrace.cs`, même bascule PAW que le surlignage). Le tracé peint les **cases du masque**, pas le rectangle : mêmes règles que l'injection (`ScatterCleaner.RasterFor`), une case n'est peinte que par le quad qui la **possède** (`QuadLocator.Contains`, sinon l'alpha doublerait à chaque couture), et rien n'est peint sur un quad pris par un autre mod. Il suit le relief par **raycast sur le collider** (layer 15) et non par `GetSurfaceHeight` : l'analytique n'est exact qu'aux sommets du quad, à 60 m d'écart sur la Mune, donc un tapis posé dessus s'enterre dans chaque creux. ⚠️ **Pas encore vu en jeu.**
-- **Retirer les outils de test** (`Src/diagnostics/`) : `QuadOverlay`, `BulldozerScatterDiagnostic` et `BandDiagnostic`. À garder **jusqu'à ce que `bladeTransform` soit validé en jeu** : c'est le premier essai où le cap ne vient plus du point de contrôle, et `BandDiagnostic` est justement ce qui compare `band forward` au navball. `BandDiagnostic` a payé son écot le 2026-08-27 (il a prouvé la visée et chiffré le bug du cap), et c'est le seul moyen de distinguer « le masque est ailleurs » de « la lame passe entre les cailloux ».
+- **Retirer les outils de test** (`Src/diagnostics/`) : `QuadOverlay` et `BandDiagnostic`. À garder **jusqu'à ce que `bladeTransform` soit validé en jeu** : c'est le premier essai où le cap ne vient plus du point de contrôle, et `BandDiagnostic` est justement ce qui compare `band forward` au navball. `BandDiagnostic` a payé son écot le 2026-08-27 (il a prouvé la visée et chiffré le bug du cap), et c'est le seul moyen de distinguer « le masque est ailleurs » de « la lame passe entre les cailloux ».
 - **Détail terrain : exigence caduque.** On voulait imposer le preset maximum, d'abord pour la finesse (elle vient de la texture, pas du maillage : sans objet), puis parce que la taille des quads en dépend. Les deux raisons sont tombées : l'arête est **mesurée en vol** et voyage dans l'action, et un changement de preset est détecté par la garde `maxLevel` (l'action est alors ignorée avec un avertissement, plutôt qu'appliquée de travers). Reste à décider ce qu'on fait de ces actions orphelines — les recalculer à la première occasion en vol serait plus élégant que de les abandonner.
 - **Bords de zone** : coupure franche ou dégradé dans le masque (le sampler est bilinéaire, un masque adouci suffirait). Sans objet à 5 m de large — une seule case, aucune place pour un dégradé — et de peu d'intérêt à 20 m : le bord perçu est celui des scatters survivants, déjà irrégulier à l'échelle de leur espacement.
 

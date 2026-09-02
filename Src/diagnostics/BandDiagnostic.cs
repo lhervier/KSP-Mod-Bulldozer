@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Reflection;
 using System.Text;
 using Unity.Collections;
 using UnityEngine;
@@ -23,7 +24,9 @@ namespace com.github.lhervier.ksp.bulldozermod.diagnostics
     /// 2. rocks that no overlay can ever show (families Parallax does not track per instance) — caught by
     ///    the family list at the end;
     /// 3. neither: the blade is 5 m wide and the big scatters are clusters anchored up to 25 m away, so they
-    ///    legitimately survive — which the instance table shows as "far from the axis, not blocked".
+    ///    legitimately survive — which the instance table shows as "far from the axis, not blocked";
+    /// 4. after a pass has been applied and reloaded, a decal that Parallax never wired in — caught by the
+    ///    wiring section, which reads the GAME's state rather than replaying our own arithmetic.
     ///
     /// The two coordinate systems it prints are deliberately independent: (along, perp) comes from plain
     /// tangent-plane geometry, the verdict comes from the mask. Agreement between them is the proof.
@@ -82,6 +85,7 @@ namespace com.github.lhervier.ksp.bulldozermod.diagnostics
             DumpBand(sb, blade, vessel, body, sphere, band);
             DumpHeadings(sb, blade, vessel, body, band);
             DumpQuads(sb, body, band);
+            DumpWiring(sb, body, sphere, band);
             DumpInstances(sb, body, band);
             DumpFamilies(sb, body);
 
@@ -243,6 +247,134 @@ namespace com.github.lhervier.ksp.bulldozermod.diagnostics
                 }
                 sb.AppendLine($"    cells cleared={cleared} in box [{minX}..{maxX}]x[{minY}..{maxY}]");
             }
+        }
+
+        /// <summary>
+        /// What the GAME made of the decals we injected, as opposed to what we would compute ourselves.
+        ///
+        /// Everything else in this dump is our own arithmetic replayed: the owner line, the raster, the
+        /// verdicts. They all agree with each other by construction, so they cannot catch the one failure
+        /// where the decal is attached, the mask is right, and the rocks stay anyway — Parallax never wired
+        /// the mask into the quad's scatter data. `readBlockMap` is the only line that says so.
+        ///
+        /// Second thing only this section sees: a quad ABSENT from Parallax's registry. The impacted-quad
+        /// search walks that same registry, so a missing quad drops out of the list silently — it shows up
+        /// here as a nearest quad further away than a quad half-diagonal.
+        /// </summary>
+        private static void DumpWiring(StringBuilder sb, CelestialBody body, PQS sphere, SurfaceBand band)
+        {
+            DumpOurDecals(sb, sphere);
+
+            sb.AppendLine($"registry: maskedScattersPerQuad={PQSMod_MapDecalVertexRemoveScatter.maskedScattersPerQuad.Count} " +
+                          $"scatterQuadData={ScatterComponent.scatterQuadData.Count}");
+
+            // Searched in PLANET frame, the frame band.origin and PQ.positionPlanetRelative share. Comparing
+            // Unity transforms instead would mix a rotating frame with a fixed one.
+            PQ closest = null;
+            ScatterSystemQuadData closestData = null;
+            double closestAngle = double.MaxValue;
+            foreach (KeyValuePair<PQ, ScatterSystemQuadData> entry in ScatterComponent.scatterQuadData)
+            {
+                PQ quad = entry.Key;
+                if (quad == null || quad.gameObject == null)
+                {
+                    continue;
+                }
+                double angle = MathUtils.AngleBetween(quad.positionPlanetRelative, band.origin);
+                if (angle < closestAngle)
+                {
+                    closestAngle = angle;
+                    closest = quad;
+                    closestData = entry.Value;
+                }
+            }
+
+            if (closest == null)
+            {
+                sb.AppendLine("no Parallax quad data at all — scatters are not managed on this body?");
+                return;
+            }
+
+            bool registered = PQSMod_MapDecalVertexRemoveScatter.maskedScattersPerQuad.ContainsKey(closest);
+            sb.AppendLine($"nearest scatter quad to the band origin: sub={closest.subdivision} " +
+                          $"dist={closestAngle * body.Radius:F0} m ours={YesNo(registered)} " +
+                          $"blockMapPQSMod={(closestData.blockMapPQSMod == null ? "NULL" : "set")} " +
+                          $"blockMapData={(closestData.blockMapData == null ? "NULL" : "set")}");
+            sb.AppendLine("    (a distance larger than a quad half-diagonal means the quad UNDER the blade is " +
+                          "not in the registry: its scatters were built without our mask)");
+
+            int reading = 0;
+            foreach (ScatterData data in closestData.quadScatters)
+            {
+                if (data.readBlockMap)
+                {
+                    reading++;
+                }
+            }
+            sb.AppendLine($"    families on that quad: {closestData.quadScatters.Count}, " +
+                          $"reading our block map: {reading}");
+            foreach (ScatterData data in closestData.quadScatters)
+            {
+                sb.AppendLine($"      {data.scatter.scatterName,-30} readBlockMap={data.readBlockMap}");
+            }
+        }
+
+        // Our decals as the PQS sees them. `inModList` proves SetupMods() collected the decal at all, and a
+        // zero inclusionAngle proves OnSetup never ran on it — either alone explains a decal that attaches
+        // to nothing, and neither is visible from our own side of the fence.
+        private static void DumpOurDecals(StringBuilder sb, PQS sphere)
+        {
+            // PQS.mods is private, and it is the list SetupMods() actually built — the only proof our decal
+            // was collected rather than merely parented to the sphere.
+            FieldInfo modsField = typeof(PQS).GetField("mods", BindingFlags.Instance | BindingFlags.NonPublic);
+            PQSMod[] mods = modsField == null ? null : modsField.GetValue(sphere) as PQSMod[];
+
+            FieldInfo angleField = typeof(PQSMod_MapDecalVertexRemoveScatter)
+                .GetField("inclusionAngle", BindingFlags.Instance | BindingFlags.NonPublic);
+
+            int found = 0;
+            foreach (Transform child in sphere.transform)
+            {
+                if (child.name != BulldozerConstants.DecalGoName)
+                {
+                    continue;
+                }
+                found++;
+
+                PQSMod_MapDecalVertexRemoveScatter decal =
+                    child.GetComponent<PQSMod_MapDecalVertexRemoveScatter>();
+                if (decal == null)
+                {
+                    sb.AppendLine("  decal GameObject carries no PQSMod!");
+                    continue;
+                }
+
+                bool inModList = false;
+                if (mods != null)
+                {
+                    foreach (PQSMod mod in mods)
+                    {
+                        if (ReferenceEquals(mod, decal))
+                        {
+                            inModList = true;
+                            break;
+                        }
+                    }
+                }
+
+                double inclusionAngle = angleField != null ? (double)angleField.GetValue(decal) : -1.0;
+                sb.AppendLine($"  decal: enabled={decal.modEnabled} inModList={YesNo(inModList)} " +
+                              $"order={decal.order} radius={decal.radius:F0} " +
+                              $"inclusionAngle={inclusionAngle:E3} (={inclusionAngle * decal.sphere.radius:F0} m) " +
+                              $"mask={(decal.colorMap == null ? "NULL" : decal.colorMap.width + "px")} " +
+                              $"blocked={decal.blockedScatters?.Count}");
+            }
+            sb.AppendLine($"our decals on this body: {found}");
+        }
+
+        private static string YesNo(bool value)
+        {
+            return value ? "YES" : "NO";
         }
 
         // Lists every collideable instance around the vessel with, side by side, where it sits relative to
