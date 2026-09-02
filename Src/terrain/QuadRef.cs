@@ -1,5 +1,6 @@
 using UnityEngine;
 using Parallax.PQS_Mods;
+using com.github.lhervier.ksp.bulldozermod.parallax;
 
 namespace com.github.lhervier.ksp.bulldozermod.terrain
 {
@@ -25,6 +26,20 @@ namespace com.github.lhervier.ksp.bulldozermod.terrain
 
         /// <summary>The decal that already owns this quad, or null. Only meaningful in flight.</summary>
         public PQSMod_MapDecalVertexRemoveScatter owner;
+
+        /// <summary>
+        /// The decal owning this quad when it belongs to ANOTHER mod, or null when the quad is free or
+        /// already ours. Parallax allows one decal per quad and drops the loser silently, so a quad in
+        /// this state can never take one of ours.
+        ///
+        /// Where that rule lives for everything working off a QuadRef: the PAW announces it, the click
+        /// refuses on it, and the pass trace leaves the quad unpainted because of it. The highlighter asks
+        /// Parallax's registry the same question directly, having no QuadRef to read it from.
+        /// </summary>
+        public PQSMod_MapDecalVertexRemoveScatter ForeignOwner
+        {
+            get { return owner is BulldozerScatterDecal ? null : owner; }
+        }
 
         /// <summary>
         /// Inward normals of the four great-circle planes bounding this quad, as

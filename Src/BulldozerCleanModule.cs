@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using UnityEngine;
+using Parallax.PQS_Mods;
 using com.github.lhervier.ksp.shared;
 using com.github.lhervier.ksp.bulldozermod.diagnostics;
 using com.github.lhervier.ksp.bulldozermod.parallax;
@@ -139,6 +140,7 @@ namespace com.github.lhervier.ksp.bulldozermod
         private bool _hasEdge;
         private float _costTimer;
         private bool _highlightLabelOn;
+        private bool _reserved;
 
         /// <summary>
         /// The strip a pass of <paramref name="length"/> by <paramref name="width"/> meters would clear if
@@ -363,6 +365,10 @@ namespace com.github.lhervier.ksp.bulldozermod
             // quad registry on every refresh.
             if (part.PartActionWindow == null || cellsLeft <= 0f)
             {
+                // Due again the moment the window comes back rather than up to half a second later: what it
+                // last showed was true before it was closed, and the pass button now hangs off that same
+                // answer.
+                _costTimer = 0f;
                 return;
             }
 
@@ -494,43 +500,79 @@ namespace com.github.lhervier.ksp.bulldozermod
                                                    Mathf.RoundToInt(cellCapacity));
 
             bool worn = cellsLeft <= 0f;
-            Events["ClearScatters"].guiName = ModLocalization.GetString(worn ? "bladeWorn" : "clearScatters");
-            Events["ClearScatters"].guiActive = !worn;
             Fields["costStatus"].guiActive = !worn;
             Fields["clearanceStatus"].guiActive = !worn;
             Fields["tiltStatus"].guiActive = !worn;
+
+            SyncClearButton();
         }
 
-        // What the pass currently set up would cost. Silent about anything it cannot answer: an unusable
-        // heading already has its own refusal message at click time.
+        // Whether the pass button is offered at all. Two ways to lose it, and each of them says why on the
+        // line right above it in the same window: a worn-out blade (the wear line) and ground another mod
+        // has reserved (the cost line).
+        //
+        // Taken away rather than left to be clicked and turned down — but the click keeps its own refusal
+        // all the same, because this is only ever as fresh as the last cost refresh, and a rover that has
+        // rolled onto a reserved quad since then would otherwise pay a reload for nothing.
+        private void SyncClearButton()
+        {
+            bool worn = cellsLeft <= 0f;
+            Events["ClearScatters"].guiName = ModLocalization.GetString(worn ? "bladeWorn" : "clearScatters");
+            Events["ClearScatters"].guiActive = !worn && !_reserved;
+        }
+
+        // What the pass currently set up would cost, or what stands in its way. Silent about anything it
+        // cannot answer: an unusable heading already has its own refusal message at click time.
         private void SyncCost()
         {
-            int cost;
-            costStatus = TryEstimateCost(out cost)
-                ? ModLocalization.GetString("passCostValue", cost)
-                : ModLocalization.GetString("passCostUnknown");
+            bool reserved;
+            costStatus = CostLabel(out reserved);
+            if (reserved != _reserved)
+            {
+                _reserved = reserved;
+                SyncClearButton();
+            }
         }
 
-        // Cells the pass THIS blade would make newly clears, or false when its strip cannot be worked out at
-        // all. Priced on the blade's own vessel, never on the active one: a PAW opened on a rover parked
-        // next door must quote what that rover would do.
-        private bool TryEstimateCost(out int cost)
+        // The cost line as the PAW shows it: the price of the pass THIS blade would make, or the decal that
+        // makes it impossible — in which case <reserved> comes back true, which is what takes the pass
+        // button away. Priced on the blade's own vessel, never on the active one: a PAW opened on a rover
+        // parked next door must quote what that rover would do.
+        //
+        // The reservation comes out of the very quad list the price is computed from, so it costs nothing to
+        // report and cannot disagree with the click, which works off the same list.
+        private string CostLabel(out bool reserved)
         {
-            cost = 0;
+            reserved = false;
+
             if (vessel == null || vessel.mainBody == null || vessel.mainBody.pqsController == null)
             {
-                return false;
+                return ModLocalization.GetString("passCostUnknown");
             }
 
             SurfaceBand band;
             if (!TryBuildBand(this, passLength, passWidth, out band))
             {
-                return false;
+                return ModLocalization.GetString("passCostUnknown");
             }
 
-            cost = PassCost.Compute(vessel.mainBody, band,
-                                    QuadLocator.FindImpactedQuads(vessel.mainBody, band));
-            return true;
+            List<QuadRef> quads = QuadLocator.FindImpactedQuads(vessel.mainBody, band);
+
+            // One taken quad turns the whole pass down at the click, so a price here would quote something
+            // that is about to be refused. Named rather than merely flagged: the name IS the answer to
+            // "why can't I clear here", and near the space center it reads ParallaxMaskKSC.
+            //
+            // ONE name, even where several mods block different quads of the same pass, and not always the
+            // same one — see QuadLocator.FindForeignOwner for why that is accepted.
+            PQSMod_MapDecalVertexRemoveScatter foreign = QuadLocator.FindForeignOwner(quads);
+            if (foreign != null)
+            {
+                reserved = true;
+                return ModLocalization.GetString("passCostReserved", foreign.gameObject.name);
+            }
+
+            return ModLocalization.GetString("passCostValue",
+                                             PassCost.Compute(vessel.mainBody, band, quads));
         }
 
         // How the blade lies over the ground, as the PAW shows it. Both values name their limit as soon as
@@ -710,16 +752,16 @@ namespace com.github.lhervier.ksp.bulldozermod
             }
 
             // Refuse now rather than after a pointless reload: a quad already claimed by another mod's decal
-            // can never take ours (Parallax allows one decal per quad).
-            foreach (QuadRef quad in quads)
+            // can never take ours (Parallax allows one decal per quad). The PAW has been saying so from the
+            // same list, so this is the confirmation of a refusal the player has already read, not a
+            // surprise.
+            PQSMod_MapDecalVertexRemoveScatter foreign = QuadLocator.FindForeignOwner(quads);
+            if (foreign != null)
             {
-                if (quad.owner != null && !(quad.owner is BulldozerScatterDecal))
-                {
-                    LOGGER.LogWarning($"Quad at {quad.direction} already owned by " +
-                                      $"'{quad.owner.gameObject.name}' — refusing");
-                    Warn(ModLocalization.GetString("areaReserved", quad.owner.gameObject.name));
-                    return;
-                }
+                LOGGER.LogWarning($"A quad under the pass is already owned by " +
+                                  $"'{foreign.gameObject.name}' — refusing");
+                Warn(ModLocalization.GetString("areaReserved", foreign.gameObject.name));
+                return;
             }
 
             int cost = PassCost.Compute(body, band, quads);

@@ -115,6 +115,38 @@ namespace com.github.lhervier.ksp.bulldozermod.terrain
         }
 
         /// <summary>
+        /// The first of <paramref name="quads"/> another mod's decal already owns, or null when they are
+        /// all clearable.
+        ///
+        /// One taken quad settles the whole pass, hence the first rather than a list: Parallax allows a
+        /// single decal per quad, so a strip crossing even one of them cannot be cleared as asked.
+        ///
+        /// ⚠️ A pass spans SEVERAL quads — four is usual, more on a small body — and each carries its own
+        /// owner, so several mods can be blocking at once. Only one is ever named, and WHICH one is not
+        /// determined: the quads are enumerated from Parallax's registry, a dictionary they are added to
+        /// and dropped from as the terrain streams in. So with two blockers the name the PAW shows can
+        /// change from one refresh to the next. Accepted deliberately (Lionel, 2026-09-02) — the refusal
+        /// is the same whoever is named, and no such second decal exists in stock + Parallax anyway, where
+        /// ParallaxMaskKSC is the only one.
+        /// </summary>
+        public static PQSMod_MapDecalVertexRemoveScatter FindForeignOwner(IList<QuadRef> quads)
+        {
+            if (quads == null)
+            {
+                return null;
+            }
+            for (int i = 0; i < quads.Count; i++)
+            {
+                PQSMod_MapDecalVertexRemoveScatter foreign = quads[i].ForeignOwner;
+                if (foreign != null)
+                {
+                    return foreign;
+                }
+            }
+            return null;
+        }
+
+        /// <summary>
         /// Unit directions of a quad's four corners, in the frame of PQ.positionPlanetRelative. Returns
         /// false when the quad has no usable matrix yet.
         /// </summary>

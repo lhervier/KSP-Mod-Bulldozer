@@ -1,6 +1,5 @@
 using System.Collections.Generic;
 using UnityEngine;
-using Parallax.PQS_Mods;
 using com.github.lhervier.ksp.shared;
 using com.github.lhervier.ksp.bulldozermod.terrain;
 using com.github.lhervier.ksp.bulldozermod.utils;
@@ -136,8 +135,7 @@ namespace com.github.lhervier.ksp.bulldozermod.parallax
                 // A quad another mod's decal already owns can never take ours: nothing would be cleared
                 // there, so nothing is painted. Silently, which is exactly why it has to show (near the KSC,
                 // ParallaxMaskKSC).
-                PQSMod_MapDecalVertexRemoveScatter owner = quads[i].owner;
-                if (owner != null && !(owner is BulldozerScatterDecal))
+                if (quads[i].ForeignOwner != null)
                 {
                     continue;
                 }
