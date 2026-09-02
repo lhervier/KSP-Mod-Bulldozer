@@ -19,6 +19,31 @@ namespace com.github.lhervier.ksp.bulldozermod.terrain
         /// </summary>
         public const double WidthStep = ScatterMask.MetersPerPixel;
 
+        /// <summary>
+        /// How much (m) is taken off the length and the width the player asked for, so that a carefully
+        /// placed pass can actually land on the cell count it advertises.
+        ///
+        /// The clearing rule is "every cell the rectangle touches", so a strip exactly N cells wide covers N
+        /// columns only when its edges fall exactly on cell boundaries — a zero-width window in floating
+        /// point, hence never. A 5 m pass therefore always cleared 10 m, and the number in the PAW named
+        /// something unreachable. Taking one metre off opens that window to 1 m in 5 WITHOUT changing the
+        /// worst case, which stays N+1 columns either way: pure gain, not a trade-off.
+        ///
+        /// What it buys, on a 50 x 10 m pass: its floor drops from 11 x 3 = 33 cells to 10 x 2 = 20 cells.
+        /// The player aims with the preview — the stepped edge goes straight when the heading lines up, and
+        /// the cost in the PAW falls to its floor when the offset does.
+        ///
+        /// Reachable only over a short pass: the window has to absorb the drift over the whole length, so it
+        /// asks for 2.9 deg of heading accuracy at 20 m but 0.29 deg at 200 m. And a grid belongs to ONE
+        /// quad — the next one along is rotated — so a strip crossing a seam is quantised again on the far
+        /// side whatever the player does.
+        ///
+        /// ⚠️ Applied EXACTLY ONCE, where the player's gesture becomes a strip
+        /// (BulldozerCleanModule.TryBuildBand), and never here: an action records the strip that was drawn,
+        /// so applying it in TryCreate would shrink every recorded zone by another metre on every load.
+        /// </summary>
+        public const double GridSlack = 1.0;
+
         /// <summary>Unit direction of the point the strip starts from (the blade's cutting edge).</summary>
         public Vector3d origin;
 
@@ -29,7 +54,7 @@ namespace com.github.lhervier.ksp.bulldozermod.terrain
         public double length;
 
         /// <summary>
-        /// Width (m) of the blade, hence of the strip. A player setting.
+        /// Width (m) of the strip: what the player asked for, less <see cref="GridSlack"/>.
         ///
         /// Do not judge a width by the instance count it blocks: measured in game, a 5 m pass blocks only
         /// 5-9% of the instances around it, yet clears a corridor tens of meters wide, because every blocked

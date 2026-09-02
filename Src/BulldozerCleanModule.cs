@@ -147,6 +147,9 @@ namespace com.github.lhervier.ksp.bulldozermod
         /// <paramref name="blade"/> were used right now: from that blade's own cutting edge, along the way
         /// it faces. Returns false when the blade points nowhere usable.
         ///
+        /// The strip is <see cref="SurfaceBand.GridSlack"/> shorter and narrower than what is asked for, so
+        /// that a carefully placed pass can land on the cell count it advertises.
+        ///
         /// A blade aims with ITSELF, and it is the only way a strip is ever built — the overlays call this
         /// too, with the blade being previewed. That matters as soon as a rover carries two: a rear-mounted
         /// blade has to send its pass backwards, and a blade slung out on an arm has to clear the ground it
@@ -160,6 +163,17 @@ namespace com.github.lhervier.ksp.bulldozermod
             {
                 return false;
             }
+
+            // The ONE place the slack is taken off, because this is the one place a player's gesture becomes
+            // a strip — the click, the price, the preview and the diagnostic all come through here. It must
+            // not move into SurfaceBand.TryCreate: an action records the strip that was drawn, so the replay
+            // path (BulldozerAction.ToBand) goes through TryCreate too, and would shave another metre off
+            // every recorded zone on every single load.
+            //
+            // Length is taken off the FAR END — the origin is the cutting edge, which is the point the
+            // player aims — while the width, being centred on that axis, loses half of it on each side.
+            length -= SurfaceBand.GridSlack;
+            width -= SurfaceBand.GridSlack;
 
             CelestialBody body = blade.vessel.mainBody;
 

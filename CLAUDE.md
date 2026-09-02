@@ -135,9 +135,13 @@ Les corps en gras sont **mesurés en jeu** (dumps du 2026-08-27, terrain detail 
 
 **On stocke le geste, jamais les cases.** Les cases sont la granularité de rasterisation dans le masque, pas une unité de persistance — une passe de 200 × 10 m fait déjà 80 cases, et c'est le même raisonnement qui avait fait rejeter le stockage des hauteurs par sommet. Une action porte donc `{ origine, direction, longueur, largeur }`. La largeur y **voyage** parce qu'elle est un réglage joueur : rejouer une vieille action doit utiliser la largeur avec laquelle elle a été demandée, pas celle du curseur au moment du chargement.
 
+⚠️ Ce sont les dimensions de la bande **dessinée**, déjà amputées du jeu de grille (« Le jeu de 1 m ») — pas les valeurs des curseurs. C'est le bon choix : si la constante change un jour, les zones déjà enregistrées ne se déforment pas. Corollaire : la relecture ne doit **jamais** réappliquer le retrait.
+
 ### La passe de lame — et pourquoi la pixelisation devient le sujet
 
 Le geste est un **rectangle** partant du **tranchant de la lame, dans la direction qu'elle regarde**, **longueur de 5 à 200 m** et **largeur de 5 à 20 m**, les deux au pas de 5 m (= une case de masque) et réglables dans le PAW. Défaut : 50 × 10 m.
+
+⚠️ **La bande réellement tracée est 1 m plus courte et 1 m plus étroite que les curseurs** (`SurfaceBand.GridSlack`) — 50 × 10 dessine 49 × 9. Le pourquoi est plus bas (« Le jeu de 1 m ») ; ce qu'il faut retenir ici, c'est que **les curseurs ne décrivent pas la géométrie du rectangle** mais la largeur de couloir visée, et que c'est la bande **amputée** qui est enregistrée dans l'action.
 
 **La passe appartient à la lame, pas au vaisseau** — origine *et* direction. C'est ce qui fait de la lame un outil qu'on **porte** plutôt qu'une propriété du rover : une lame déportée sur un bras nettoie le sol qu'elle survole vraiment, une lame montée à l'arrière envoie sa passe en arrière, et deux lames sur un même châssis font deux passes différentes au lieu de la même deux fois. L'origine est **le point même** que mesure `BladeStance` : ce qu'on vérifie être au ras du sol est exactement ce d'où la passe part.
 
@@ -164,6 +168,38 @@ Ensuite, la règle de tracé cesse d'être un détail :
 - et il peut se décaler d'une **demi-case** de l'axe de la lame → jusqu'à **12 % de la trace de la lame reste debout**, en liseré sur un bord.
 
 Ce dernier point est exactement pourquoi le **highlight échantillonne le masque** et non le rectangle (`ScatterHighlighter`, cf. §4) : aucune approximation géométrique ne le montrerait. Combiné aux **grappes** (§ PIÈGE ci-dessous), qui laissent debout des blocs ancrés jusqu'à 25 m à côté, la conséquence assumée est qu'une passe étroite ne dégage pas un couloir propre au premier essai — le joueur le **voit** avant de valider, et repositionne.
+
+### Le jeu de 1 m : rendre le compte de cases atteignable (2026-09-02)
+
+Avec la règle « toute case touchée », une bande de largeur exactement `5N` ne couvre `N` colonnes que si ses bords tombent **pile** sur des frontières de cases — une fenêtre de **mesure nulle**, donc jamais atteinte en flottant. Le PAW annonçait ainsi une valeur **structurellement inatteignable** : 5 m demandés donnaient toujours 10 m, et 50 × 10 donnait toujours 11 × 3 cases.
+
+**On retire donc 1 m** à la longueur et à la largeur (`SurfaceBand.GridSlack`). La fenêtre de phase passe de 0 à **1 m sur 5**, et surtout le **pire cas ne bouge pas** — `N+1` colonnes dans les deux cas. Ce n'est donc pas un arbitrage, c'est un gain strict.
+
+**Ce que ça achète, chiffré** : sur une passe de 50 × 10 m, le plancher de coût tombe de `11 × 3 = 33` à `10 × 2 = 20` cases, soit **39 %**. L'alignement cesse d'être une coquetterie — il paie en quota, et le PAW le montre en direct.
+
+**Le joueur vise avec l'aperçu, et il a deux indicateurs distincts** :
+
+- **l'angle** — le bord en escalier de `BandTrace` **devient droit** quand le cap s'aligne sur la grille. Signal binaire, très lisible sur du terrain (cf. `docs/10-Preview.png`) ;
+- **la phase** — le **coût en cases** du PAW tombe à son plancher. C'est un compteur exact, rafraîchi 2×/s ; sur terrain vierge il donne exactement le nombre de cases couvertes.
+
+**Domaine de validité, à ne pas surestimer.** La fenêtre de 1 m doit absorber la dérive `L × sin θ` sur toute la longueur :
+
+| Longueur | Précision de cap requise |
+|---|---|
+| 5 m | 11,5° |
+| 20 m | 2,9° |
+| 50 m | 1,15° |
+| 200 m | 0,29° |
+
+Le bénéfice est donc réel jusqu'à ~20-50 m et purement théorique à 200 m — où le retrait ne fait plus que coûter 1 m au bout (0,5 %). À quoi s'ajoute que **la grille appartient à UN quad** : `rot` dérive de `FromToRotation(centre du quad, up)`, donc le quad voisin a une grille **tournée**, et une bande qui traverse une couture est requantifiée de l'autre côté quel que soit le soin du joueur. L'alignement n'est tenable qu'à l'intérieur d'un quad.
+
+**Ce qu'on perd** : la bande est plus étroite que la lame. Sur une BD-5 (5 m) réglée à 5 m, le cas *bien aligné* peut laisser jusqu'à **20 %** de la trace réelle de la lame debout, contre ~12 % avant. Cosmétique au regard des grappes de 15-25 m — la métrique honnête reste « la largeur de sol qui paraît propre ».
+
+⚠️ **Le retrait est appliqué EXACTEMENT UNE FOIS**, dans `BulldozerCleanModule.TryBuildBand`, le seul endroit où le geste du joueur devient une bande (clic, prix, aperçu, tracé et diagnostic passent tous par là). **Jamais dans `SurfaceBand.TryCreate`** : le chemin de relecture (`BulldozerAction.ToBand`) y passe aussi, et comme l'action enregistre `band.length`/`band.width` — la bande **déjà** amputée — le retrait y serait réappliqué **à chaque chargement**, rognant 1 m de plus à chaque fois. C'est le piège à ne pas réintroduire.
+
+Deux détails de géométrie : le mètre est retiré **au bout** en longueur (l'origine est le tranchant, le point que le joueur vise) et **centré** en largeur (`BandRaster` travaille sur `width × 0,5` de part et d'autre de l'axe, donc 0,5 m de chaque côté sans rien à écrire).
+
+**Pourquoi 1 m et pas autre chose** : la fenêtre doit dépasser confortablement la précision de placement d'un rover au pas (de l'ordre du décimètre) sans amputer la case. 0,5 m serait pénible à viser, 2 m mangerait 40 % de la case pour un confort qu'on n'a pas besoin d'acheter.
 
 ### Ce que la multiplicité des masques ne coûte PAS
 
@@ -298,7 +334,7 @@ Ce que la lecture de la source Parallax a permis d'**écarter** au passage (à n
 
 ### Contraintes
 
-- **Bande rectangulaire** partant du tranchant de la lame, dans la direction qu'elle regarde, **5 à 200 m de long** et **5 à 20 m de large**, réglables dans le PAW au pas de 5 m.
+- **Bande rectangulaire** partant du tranchant de la lame, dans la direction qu'elle regarde, **5 à 200 m de long** et **5 à 20 m de large**, réglables dans le PAW au pas de 5 m — la bande tracée étant 1 m plus courte et plus étroite que le réglage (« Le jeu de 1 m »).
 - **Aucune modification du relief.** Choix structurant, pas une simplification : ne pas toucher à la hauteur supprime **par construction** toute la famille de problèmes qui a tué l'objectif précédent (§3) — pas de mesh de quad reconstruit différemment de ses voisins, donc ni trou ni fissure de LOD ; pas de sol qui monte ou descend sous un vaisseau posé, donc ni encastrement, ni explosion au rechargement, ni re-seating à gérer.
 - **Persistant** : la zone nettoyée doit le rester après sauvegarde, rechargement, et redémarrage de KSP.
 - **Application par sauvegarde + rechargement**, sur une **save dédiée** (`"BulldozerReload"`, jamais `"persistent"` : le rechargement est une manœuvre du mod, pas une sauvegarde voulue par le joueur, et un autosave de sortie de scène pourrait l'écraser). Le nettoyage n'a pas besoin d'être immédiat, et le rechargement garantit une injection **à froid**, avant que KSP ne bâtisse le PQS, vaisseau *packed*.
@@ -583,6 +619,8 @@ Elles remplacent le patch ModuleManager qui posait le module sur tous les module
 **Le vrai frein aux autoroutes est la masse, pas le quota.** Le quota borne UNE lame ; la masse borne le nombre de lames qu'on peut poser sur un corps. C'est pour ça que `kg/case` **descend** avec la taille : la progression technologique doit récompenser, sinon personne ne monte en gamme. Ce qu'il faut éviter reste l'**accumulation** : chaque quad nettoyé porte pour toute la session un `PQSMod` et sa `Texture2D` lisible (**~52 Ko par quad sur la Mune**, mesuré ; une passe touche 4 quads, d'où les « 206 Ko total » que `QuadOverlay` affiche), tous **reconstruits à chaque chargement** par `ScatterCleaner.InjectActions`, et tous parcourus à chaque build de quad. Le quota est donc un **garde-fou de performance déguisé en gameplay** : le joueur comprend « ma lame est usée », pas « le mod rame ».
 
 **Ce que les quotas achètent.** Une case déjà noire étant gratuite, une zone compacte de S cases de côté coûte ≈ `S² + 2S` (l'aire, plus son périmètre payé une fois) : **~65 × 65 m**, **~115 × 115 m** et **~215 × 215 m**. Corollaire assumé : des passes **jointives** ne paient presque que leur surface, des passes éparpillées repaient leur périmètre à chaque fois. Une passe isolée de 200 × 5 m coûte ~85 à 100 cases, pas 40.
+
+**Et l'alignement paie.** Depuis le jeu de 1 m (§2), une passe posée dans l'axe de la grille tombe sur son plancher de cases : **20 au lieu de 33** sur un 50 × 10 m, soit ~39 %. Le quota récompense donc le soin, et le joueur lit le gain en direct dans le PAW. Les surfaces ci-dessus restent des ordres de grandeur pour une zone bien faite — ce qui diminue est le **gâchis de désalignement**, pas la surface utile.
 
 ⚠️ **Le comptage ne se fait NI sur la surface du geste, NI sur la somme des cases effacées par quad.** Les deux sont faux, pour deux raisons différentes :
 

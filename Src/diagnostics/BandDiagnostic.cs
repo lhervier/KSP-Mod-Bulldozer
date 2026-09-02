@@ -74,6 +74,11 @@ namespace com.github.lhervier.ksp.bulldozermod.diagnostics
                 return;
             }
 
+            // Spelt out because the dump reports the strip, not the sliders, and the two differ on purpose:
+            // a 50 x 10 m setting draws 49 x 9 so that a well-placed pass can land on 10 x 2 cells.
+            sb.AppendLine($"sliders length={length:F0} width={width:F0} — the strip below is " +
+                          $"{SurfaceBand.GridSlack:F0} m shorter and narrower (SurfaceBand.GridSlack)");
+
             DumpBand(sb, blade, vessel, body, sphere, band);
             DumpHeadings(sb, blade, vessel, body, band);
             DumpQuads(sb, body, band);
