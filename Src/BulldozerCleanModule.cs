@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using UnityEngine;
 using Parallax.PQS_Mods;
@@ -141,6 +141,20 @@ namespace com.github.lhervier.ksp.bulldozermod
         private float _costTimer;
         private bool _highlightLabelOn;
         private bool _reserved;
+
+        // What the two stance lines were last written with, in the units they are FORMATTED in — hundredths
+        // of a metre, whole degrees — plus whether each was over its limit, since that picks a different
+        // sentence for the same number. NoStance means nothing has been written yet, and doubles as the
+        // "no ground under the blade" state.
+        //
+        // They exist so the lines are only rebuilt when what they say changes: SyncStance runs every frame
+        // (see OnUpdate for why), and each label costs a params array, an interpolated key and a
+        // String.Format for a value that moves by the centimetre.
+        private const int NoStance = int.MinValue;
+        private int _shownClearanceCm = NoStance;
+        private int _shownTiltDeg = NoStance;
+        private bool _shownClearanceOver;
+        private bool _shownTiltOver;
 
         /// <summary>
         /// The strip a pass of <paramref name="length"/> by <paramref name="width"/> meters would clear if
@@ -387,7 +401,8 @@ namespace com.github.lhervier.ksp.bulldozermod
             }
 
             // Every frame, unlike the cost: it is one raycast, and the player reads it while working a
-            // robotic hinge — a value refreshed twice a second is not something you can aim with.
+            // robotic hinge — a value refreshed twice a second is not something you can aim with. Only the
+            // raycast is paid at that rate; the labels are rebuilt solely when what they say changes.
             SyncStance();
 
             _costTimer -= Time.deltaTime;
@@ -597,20 +612,43 @@ namespace com.github.lhervier.ksp.bulldozermod
             BladeStance stance;
             if (!TryMeasureStance(out stance))
             {
-                clearanceStatus = ModLocalization.GetString("bladeGroundUnknown");
-                tiltStatus = ModLocalization.GetString("bladeGroundUnknown");
+                if (_shownClearanceCm != NoStance || _shownTiltDeg != NoStance)
+                {
+                    _shownClearanceCm = NoStance;
+                    _shownTiltDeg = NoStance;
+                    clearanceStatus = ModLocalization.GetString("bladeGroundUnknown");
+                    tiltStatus = ModLocalization.GetString("bladeGroundUnknown");
+                }
                 return;
             }
 
-            clearanceStatus = stance.clearance > MaxClearance
-                ? ModLocalization.GetString("bladeClearanceTooHigh",
-                                            stance.clearance.ToString("F2"), MaxClearance.ToString("F2"))
-                : ModLocalization.GetString("bladeClearanceValue", stance.clearance.ToString("F2"));
+            // The limits are tested on the raw value, exactly as the click's own refusal tests them, and the
+            // verdict is cached alongside the rounded number: within one centimetre of the limit the same
+            // "0.50" prints under two different sentences, and the PAW must not keep the reassuring one
+            // while the click turns the pass down.
+            bool clearanceOver = stance.clearance > MaxClearance;
+            int clearanceCm = (int)Math.Round(stance.clearance * 100.0);
+            if (clearanceCm != _shownClearanceCm || clearanceOver != _shownClearanceOver)
+            {
+                _shownClearanceCm = clearanceCm;
+                _shownClearanceOver = clearanceOver;
+                clearanceStatus = clearanceOver
+                    ? ModLocalization.GetString("bladeClearanceTooHigh",
+                                                stance.clearance.ToString("F2"), MaxClearance.ToString("F2"))
+                    : ModLocalization.GetString("bladeClearanceValue", stance.clearance.ToString("F2"));
+            }
 
-            tiltStatus = stance.tilt > MaxTilt
-                ? ModLocalization.GetString("bladeTiltTooSteep",
-                                           stance.tilt.ToString("F0"), MaxTilt.ToString("F0"))
-                : ModLocalization.GetString("bladeTiltValue", stance.tilt.ToString("F0"));
+            bool tiltOver = stance.tilt > MaxTilt;
+            int tiltDeg = (int)Math.Round(stance.tilt);
+            if (tiltDeg != _shownTiltDeg || tiltOver != _shownTiltOver)
+            {
+                _shownTiltDeg = tiltDeg;
+                _shownTiltOver = tiltOver;
+                tiltStatus = tiltOver
+                    ? ModLocalization.GetString("bladeTiltTooSteep",
+                                               stance.tilt.ToString("F0"), MaxTilt.ToString("F0"))
+                    : ModLocalization.GetString("bladeTiltValue", stance.tilt.ToString("F0"));
+            }
         }
 
         // Where the blade is with respect to the ground, or false when there is none under it.
