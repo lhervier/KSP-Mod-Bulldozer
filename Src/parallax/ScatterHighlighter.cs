@@ -56,20 +56,13 @@ namespace com.github.lhervier.ksp.mod.bulldozer.parallax
         /// </summary>
         public static BulldozerCleanModule Source;
 
-        // How far the overlay is pulled towards the camera, per metre of distance to it, to keep it clear
-        // of the rock's own depth. Proportional on purpose: depth precision degrades with distance, so a
-        // fixed offset that works up close stops working further out, while this one stays constant on
-        // screen. The floor covers instances almost against the lens.
+        // How far the overlay is pulled towards the camera, as a fraction of each vertex's own distance to
+        // it, to keep it clear of the rock's own depth. Proportional on purpose: depth precision degrades
+        // with distance, so a fixed offset that works up close stops working further out.
         //
-        // A camera-ward TRANSLATION, never a scale-up: see the DrawMesh call for why inflating is wrong on
-        // a cluster mesh.
-        //
-        // Private again, and NOT shared with GroundSheet, although both once held this pair: what makes it
-        // right here is that it is recomputed for every instance, at the point it moves. A sheet has one
-        // matrix for the whole thing, so the same code there could only nudge from its anchor — which is
-        // exactly the bug that put the two ground overlays half a metre out of register. See GroundSheet.Draw.
-        private const float DepthBiasPerMetre = 0.002f;
-        private const float MinDepthBias = 0.02f;
+        // Applied as a scaling CENTRED ON THE CAMERA, never as a translation from the instance's anchor:
+        // see the DrawMesh call.
+        private const float DepthPull = 0.002f;
 
         private static readonly Color HighlightColor = new Color(1f, 0.15f, 0.1f, 0.6f);
 
@@ -189,6 +182,12 @@ namespace com.github.lhervier.ksp.mod.bulldozer.parallax
 
             Vector3d originWorld = blade.OriginPoint;
 
+            // The same for every instance this frame: see the DrawMesh call.
+            Vector3 cameraPosition = camera.transform.position;
+            Matrix4x4 towardCamera = Matrix4x4.Translate(cameraPosition)
+                                     * Matrix4x4.Scale(Vector3.one * (1f - DepthPull))
+                                     * Matrix4x4.Translate(-cameraPosition);
+
             EnsureCounters();
 
             int shown = 0;
@@ -260,9 +259,10 @@ namespace com.github.lhervier.ksp.mod.bulldozer.parallax
                 }
 
                 // Same transform chain CollisionManager.CreateGameObject applies, rebuilt here because we
-                // draw instances it never instantiated.
-                Matrix4x4 quadToWorld = quadData.quad.meshRenderer.localToWorldMatrix;
-                Vector3 quadScale = quadData.quad.transform.lossyScale;
+                // draw instances it never instantiated: the collider is a child of the quad's GameObject,
+                // posed in the quad's LOCAL frame (position, scale, and since Parallax 1.0.5 the rotation).
+                Transform quadTransform = quadData.quad.gameObject.transform;
+                Matrix4x4 quadToWorld = quadTransform.localToWorldMatrix;
                 bool alignToTerrain = scatter.distributionParams.alignToTerrainNormal == 1;
                 Vector3 planetNormal = Vector3.Normalize(quadData.quad.gameObject.transform.position
                                                          - quadData.quad.sphereRoot.transform.position);
@@ -287,31 +287,34 @@ namespace com.github.lhervier.ksp.mod.bulldozer.parallax
                         continue;
                     }
 
+                    // Built in the quad's frame, as Parallax does since 1.0.5. The world-frame product it used
+                    // before gives another twist around the normal, and on a cluster that twist swings every
+                    // boulder around the anchor: the veil landed metres beside the rocks it marks.
                     Vector3 normal = alignToTerrain ? quadData.GetTerrainNormal(position.index) : planetNormal;
-                    Quaternion rotation = Quaternion.FromToRotation(Vector3.up, normal)
-                                          * Quaternion.AngleAxis(position.rotation, Vector3.up);
-
+                    Quaternion localRotation = RotationFromUp(quadTransform.InverseTransformDirection(normal))
+                                               * Quaternion.AngleAxis(position.rotation, Vector3.up);
+                    Matrix4x4 instanceToWorld = quadToWorld
+                                                * Matrix4x4.TRS(position.localPos, localRotation, position.localScale);
                     // Shadows OFF, and this is not cosmetic: the short DrawMesh overload defaults to
                     // castShadows = true, so the overlay threw its own shadow onto the ground — thin black
                     // streaks next to each rock, sliding around in 3D as the sun and camera moved.
-                    // Drawn at the rock's OWN scale, nudged towards the camera. Puffing the overlay up to
-                    // sit outside the rock rather than fight it in the z-buffer is the obvious move, and it
-                    // is wrong here: a scale applies about the MESH PIVOT, and the big families are clusters
-                    // - one mesh whose pivot is the anchor, boulders spread 15-25 m around it. A factor of
-                    // 1.03 pushed every boulder RADIALLY away from the anchor, 60 cm at 20 m: the veil kept
-                    // the shape of the rock and landed beside it (measured in flight, growing with the
-                    // factor). A translation moves the whole cluster as one and leaves its shape alone.
+                    // Drawn at the rock's own pose, then pulled towards the camera. The pull is needed: at
+                    // exactly the rock's pose the overlay z-fights it and flickers, because Parallax builds
+                    // its instance matrices on the GPU and ours on the CPU - the depths agree to within float
+                    // noise, not exactly.
                     //
-                    // The nudge is needed: at exactly the rock's position the overlay z-fights it and
-                    // flickers, because Parallax builds its instance matrices on the GPU and ours on the
-                    // CPU - the depths agree to within float noise, not exactly.
-                    Vector3 toCamera = camera.transform.position - world;
-                    float bias = Math.Max(MinDepthBias, DepthBiasPerMetre * toCamera.magnitude);
-
+                    // The big families are clusters - one mesh whose pivot is the anchor, boulders spread
+                    // 15-25 m around it - which rules out the two obvious pulls:
+                    // - puffing the overlay up about its pivot pushes every boulder RADIALLY away from the
+                    //   anchor (60 cm at 20 m for a factor of 1.03): the veil lands beside the rock;
+                    // - translating it towards the camera from the anchor moves a boulder close to the lens
+                    //   almost sideways when its anchor is metres away: it gains no depth, and the veil
+                    //   came and went in patches as the camera turned (2026-10-21).
+                    // A scaling centred on the camera moves every vertex along its own line of sight, by a
+                    // fraction of its own distance: nothing moves on screen, everything gains depth.
                     Graphics.DrawMesh(
                         mesh,
-                        Matrix4x4.TRS(world + toCamera.normalized * bias, rotation,
-                                      Vector3.Scale(quadScale, position.localScale)),
+                        towardCamera * instanceToWorld,
                         material, BulldozerConstants.TerrainLayer, camera, 0, null, ShadowCastingMode.Off, false);
 
                     shown++;
@@ -385,6 +388,22 @@ namespace com.github.lhervier.ksp.mod.bulldozer.parallax
                     LOGGER.LogInfo($"    {name}: not collideable — removed by a pass, never highlighted");
                 }
             }
+        }
+
+        // The rotation taking Vector3.up onto the unit vector normal. A copy of
+        // CollisionManager.RotationFromUp, which is private: the overlay must twist exactly as the rock does.
+        private static Quaternion RotationFromUp(Vector3 normal)
+        {
+            Vector3 v = Vector3.Cross(Vector3.up, normal);
+            float c = normal.y;
+
+            // 1 + cos, computed without cancellation when the normal points nearly down.
+            float onePlusC = c >= 0 ? 1 + c : v.sqrMagnitude / (1 - c);
+            if (onePlusC <= 0)
+            {
+                return new Quaternion(1, 0, 0, 0);
+            }
+            return Quaternion.Normalize(new Quaternion(v.x, v.y, v.z, onePlusC));
         }
 
         // Null rather than an exception if Parallax's arrays ever disagree in length.

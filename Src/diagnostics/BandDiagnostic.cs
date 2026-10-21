@@ -366,7 +366,7 @@ namespace com.github.lhervier.ksp.mod.bulldozer.diagnostics
                 sb.AppendLine($"  decal: enabled={decal.modEnabled} inModList={YesNo(inModList)} " +
                               $"order={decal.order} radius={decal.radius:F0} " +
                               $"inclusionAngle={inclusionAngle:E3} (={inclusionAngle * decal.sphere.radius:F0} m) " +
-                              $"mask={(decal.colorMap == null ? "NULL" : decal.colorMap.width + "px")} " +
+                              $"mask={(decal.colorMapT2D == null ? "NULL" : decal.colorMapT2D.width + "px")} " +
                               $"blocked={decal.blockedScatters?.Count}");
             }
             sb.AppendLine($"our decals on this body: {found}");

@@ -41,6 +41,42 @@ Le squelette de persistance et d'application « à froid » a été conservé ; 
 | `Src/diagnostics/QuadReadout.cs` | **Outil de test** : le texte des quads voisins, affiché par la fenêtre de debug — voir ci-dessous |
 | `Src/diagnostics/BandDiagnostic.cs` | **Outil de test** (entrée PAW « Analyser la passe ») : dump lecture seule de tout ce qu'une passe déciderait. Conçu pour séparer quatre pannes qui se ressemblent à l'écran — projection fausse, familles non surlignables, une lame étroite face à des grappes, ou un decal que Parallax n'a jamais câblé. C'est lui qui a prouvé la visée ([CLAUDE-validation.md](CLAUDE-validation.md)) et permis de chiffrer le bug du cap |
 
+**Compilé contre Parallax 1.0.6** (2026-10-21), plus contre la 1.0.4. Depuis la 1.0.5, le decal de
+Parallax tient deux cartes : `colorMap`, un `MapSO` lu dans sa config, et `colorMapT2D`, la texture que
+son compute shader échantillonne (`ScatterData`). `OnSetup` compile la seconde depuis la première
+seulement si elle est nulle, et désactive le decal si `colorMap` est nul. D'où
+`ParallaxInterop.SetMask` : notre texture dans `colorMapT2D`, un `MapSO` vide partagé dans `colorMap`
+(Parallax ne le relit pas : `ScatterSystemQuadData.blockMapData` est affecté, jamais lu). Pour compiler :
+configuration `parallax-1.0.6` de `gamedata.py`.
+
+**Le surlignage suit la pose des colliders de Parallax**, recopiée de `CollisionManager.CreateGameObject`.
+Depuis la 1.0.5 (notre PR #157), Parallax construit la rotation d'un rocher dans le repère **local** du
+quad (`RotationFromUp` de la normale ramenée dans ce repère, puis l'angle autour de `up`) ; la formule en
+repère monde d'avant donne une autre torsion autour de la normale, qui fait tourner chaque bloc d'un
+amas autour de son ancre : sur la Mune (2026-10-21), des rochers rouges à moitié, le voile à côté du
+rocher. `ScatterHighlighter` pose donc `quadToWorld × TRS(localPos, localRotation, localScale)`, avec une
+copie de `RotationFromUp` (privée chez Parallax). À refaire si Parallax change encore cette chaîne. Le
+**critère** ne change pas : un amas n'est surligné que si son ancre est dans la visée, donc des blocs gris
+dans la bande et des blocs rouges qui en débordent sont normaux.
+
+**Un rocher à moitié rouge ne prouve pas un voile mal posé** : les blocs de deux amas s'interpénètrent
+souvent, et si une seule des deux ancres est dans la visée, on voit un rocher mi-rouge mi-gris, voiles
+justes. Le rover qui tourne tout seul (cap 051 → 060 en deux minutes dans le cratère, freins serrés)
+déplace la bande, et ce qui en sort change d'une capture à l'autre. **Le bon test : surligner toutes les
+instances chargées**, bande ignorée (interrupteur temporaire dans `ScatterHighlighter`, retiré depuis) ; là,
+tout rocher qui n'est pas rouge en entier est un voile faux. Fait le 2026-10-21, même vue, même instant,
+seule la formule changeant : l'ancienne pose chaque voile à côté de son rocher, la nouvelle dessus. Diag
+Colliders ne départage pas d'ici : Parallax ne crée les colliders des rochers qu'au contact du vaisseau.
+
+**Le voile est tiré vers la caméra par une homothétie centrée sur elle** (`DepthPull` = 0,2 % de la
+distance de chaque sommet), plus par une translation depuis l'ancre. Vu par Lionel le 2026-10-21, rover
+immobile : en tournant la caméra de quelques degrés, des facettes grises apparaissaient et disparaissaient
+sur les rochers **proches de la caméra**. Un bloc à quelques mètres de l'objectif mais à 20 m de son ancre
+recevait une translation presque latérale : aucun gain de profondeur, z-fighting selon l'angle. Même
+leçon que pour `GroundSheet` (un tapis poussé depuis son ancre était décalé d'un demi-mètre) : sur un
+maillage étendu, rien ne se décale depuis un point unique. L'homothétie ne déplace rien à l'écran. Partie d'essai : `claude-bulldozer`
+(sauvegardes `mune-rocks` et `rover-cratere-mune`, rover au fond d'un cratère de la Mune).
+
 ### Se placer sur une limite de quad (le relevé de la fenêtre de debug)
 
 **Dans la fenêtre de debug** (bouton de la barre d'app, en vol), sous les réglages. Il liste les **4 quads-feuilles les plus proches**, avec la distance du vaisseau à leur **centre** et leur propriétaire éventuel :

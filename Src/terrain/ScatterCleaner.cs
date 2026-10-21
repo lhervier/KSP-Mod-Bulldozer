@@ -172,7 +172,7 @@ namespace com.github.lhervier.ksp.mod.bulldozer.terrain
             decal = ParallaxInterop.AddDecal(go, quadCenter, footprint, DecalOrder, blocked);
             decal.sphere = sphere;
             decal.mask = new ScatterMask(footprint);
-            decal.colorMap = decal.mask.Texture;
+            ParallaxInterop.SetMask(decal, decal.mask.Texture);
 
             // The PQS runs OnSetup itself at build time, but rot and normalisedPosition are needed NOW to
             // project the disks into the mask.

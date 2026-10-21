@@ -14,7 +14,7 @@ namespace com.github.lhervier.ksp.mod.bulldozer.parallax
     /// Only <see cref="Available"/> may be called when Parallax might be missing — it deliberately touches
     /// no Parallax type, so the CLR never has to load one.
     ///
-    /// The type we drive is PQSMod_MapDecalVertexRemoveScatter: center + radius + a colorMap mask + a list of
+    /// The type we drive is PQSMod_MapDecalVertexRemoveScatter: center + radius + a mask texture + a list of
     /// scatter names to block. It never touches terrain height (no OnVertexBuildHeight, and it declares only
     /// requirements = MeshColorChannel).
     /// </summary>
@@ -80,7 +80,7 @@ namespace com.github.lhervier.ksp.mod.bulldozer.parallax
         /// <summary>
         /// Adds an exclusion decal to <paramref name="host"/>, centered on <paramref name="position"/>. The
         /// caller owns the GameObject, must parent it under the body's PQS BEFORE the sphere builds, and
-        /// must set the mask (<c>colorMap</c>) before the terrain is built.
+        /// must set the mask (<see cref="SetMask"/>) before the terrain is built.
         /// </summary>
         /// <param name="position">Direction from the body center (body frame, not world).</param>
         /// <param name="radius">Footprint radius in meters — the decal's reach, NOT the cleared radius.</param>
@@ -143,17 +143,30 @@ namespace com.github.lhervier.ksp.mod.bulldozer.parallax
             PQSMod_MapDecalVertexRemoveScatter.maskedScattersPerQuad.Clear();
         }
 
+        // Shared by every decal, never destroyed: see SetMask.
+        private static MapSO _placeholderColorMap;
+
         /// <summary>
-        /// Destroys the mask texture held by a decal we created, if any. Textures are plain assets: destroying
-        /// the decal's GameObject would leave the texture in memory (megabytes per reload).
+        /// Hands <paramref name="mask"/> to <paramref name="decal"/> as the texture its scatters are tested
+        /// against. Must be called before the decal's OnSetup. The texture stays owned by the caller.
         /// </summary>
-        public static void DestroyMask(GameObject host)
+        public static void SetMask(PQSMod_MapDecalVertexRemoveScatter decal, Texture2D mask)
         {
-            PQSMod_MapDecalVertexRemoveScatter decal = host?.GetComponent<PQSMod_MapDecalVertexRemoveScatter>();
-            if (decal?.colorMap != null)
+            // Since Parallax 1.0.5 the decal holds two maps: colorMap, a MapSO loaded from its config, and
+            // colorMapT2D, the texture its compute shader samples (ScatterData). OnSetup compiles
+            // colorMapT2D out of colorMap only when it is still null, so setting it first keeps ours.
+            decal.colorMapT2D = mask;
+
+            // colorMap is never read once colorMapT2D is set (ScatterSystemQuadData copies it into a field
+            // nothing reads), but OnSetup disables the decal when it is null. An empty MapSO is enough, and
+            // building one from the mask would only give a copy that goes stale at the next pass.
+            if (_placeholderColorMap == null)
             {
-                Object.DestroyImmediate(decal.colorMap);
+                _placeholderColorMap = ScriptableObject.CreateInstance<MapSO>();
+                _placeholderColorMap.name = "BulldozerPlaceholderColorMap";
+                _placeholderColorMap.hideFlags = HideFlags.HideAndDontSave;
             }
+            decal.colorMap = _placeholderColorMap;
         }
     }
 }
