@@ -1,7 +1,7 @@
 using System;
 using UnityEngine;
 
-namespace com.github.lhervier.ksp.bulldozermod.terrain
+namespace com.github.lhervier.ksp.mod.bulldozer.terrain
 {
     /// <summary>
     /// The rectangular strip one blade pass clears: where it starts, which way it goes, how long it runs.

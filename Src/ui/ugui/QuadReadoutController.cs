@@ -1,8 +1,8 @@
 using UnityEngine;
 using TMPro;
-using com.github.lhervier.ksp.bulldozermod.diagnostics;
+using com.github.lhervier.ksp.mod.bulldozer.diagnostics;
 
-namespace com.github.lhervier.ksp.bulldozermod.ui.ugui
+namespace com.github.lhervier.ksp.mod.bulldozer.ui.ugui
 {
     /// <summary>
     /// Keeps the quads readout up to date while it is on screen.

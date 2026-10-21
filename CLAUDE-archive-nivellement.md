@@ -2,7 +2,7 @@
 
 Pourquoi le nivellement est abandonné — décision ferme, pas un report — et les constats vérifiés qu'il coûterait cher à ré-établir.
 
-> Fichier de contexte de **KSP-BulldozerMod**. Le fil directeur du projet est dans [CLAUDE.md](CLAUDE.md).
+> Fichier de contexte de **KSP-Mod-Bulldozer**. Le fil directeur du projet est dans [CLAUDE.md](CLAUDE.md).
 
 ## Pourquoi le nivellement est abandonné
 

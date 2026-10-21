@@ -1,7 +1,7 @@
 using UnityEngine;
 using com.github.lhervier.ksp.shared;
 
-namespace com.github.lhervier.ksp.bulldozermod.parallax
+namespace com.github.lhervier.ksp.mod.bulldozer.parallax
 {
     /// <summary>
     /// Builds the materials the flight overlays draw with — the rocks a pass would remove, and the ground

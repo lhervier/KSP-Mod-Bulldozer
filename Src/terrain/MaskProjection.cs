@@ -1,7 +1,7 @@
 using System;
 using UnityEngine;
 
-namespace com.github.lhervier.ksp.bulldozermod.terrain
+namespace com.github.lhervier.ksp.mod.bulldozer.terrain
 {
     /// <summary>
     /// The pixel grid of ONE mask: how a surface direction maps to a pixel of that mask, and back.

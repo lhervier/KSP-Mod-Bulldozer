@@ -2,7 +2,7 @@
 
 Les règles de gameplay qui encadrent une passe de lame : les cas de refus, l'usure et le coût, et les contraintes que le mod s'impose.
 
-> Fichier de contexte de **KSP-BulldozerMod**. Le fil directeur du projet est dans [CLAUDE.md](CLAUDE.md).
+> Fichier de contexte de **KSP-Mod-Bulldozer**. Le fil directeur du projet est dans [CLAUDE.md](CLAUDE.md).
 
 ### Règles de refus
 

@@ -2,11 +2,11 @@ using KSP.UI.Screens;
 using UnityEngine;
 using com.github.lhervier.ksp.shared;
 using com.github.lhervier.ksp.shared.ugui.popup;
-using com.github.lhervier.ksp.bulldozermod.settings;
-using com.github.lhervier.ksp.bulldozermod.ui.styles;
-using com.github.lhervier.ksp.bulldozermod.ui.ugui;
+using com.github.lhervier.ksp.mod.bulldozer.settings;
+using com.github.lhervier.ksp.mod.bulldozer.ui.styles;
+using com.github.lhervier.ksp.mod.bulldozer.ui.ugui;
 
-namespace com.github.lhervier.ksp.bulldozermod.ui
+namespace com.github.lhervier.ksp.mod.bulldozer.ui
 {
     /// <summary>
     /// Entry point in flight: the toolbar button and the uGUI window it toggles. The window is driven by a

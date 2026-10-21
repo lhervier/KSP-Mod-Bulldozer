@@ -2,9 +2,9 @@ using System.Collections.Generic;
 using Unity.Collections;
 using UnityEngine;
 using com.github.lhervier.ksp.shared;
-using com.github.lhervier.ksp.bulldozermod.parallax;
+using com.github.lhervier.ksp.mod.bulldozer.parallax;
 
-namespace com.github.lhervier.ksp.bulldozermod.terrain
+namespace com.github.lhervier.ksp.mod.bulldozer.terrain
 {
     /// <summary>
     /// What a blade pass costs, in mask cells: how many cells it would turn black that are not black

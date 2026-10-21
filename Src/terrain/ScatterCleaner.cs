@@ -1,10 +1,10 @@
 using System.Collections.Generic;
 using UnityEngine;
 using com.github.lhervier.ksp.shared;
-using com.github.lhervier.ksp.bulldozermod.parallax;
-using com.github.lhervier.ksp.bulldozermod.persistence;
+using com.github.lhervier.ksp.mod.bulldozer.parallax;
+using com.github.lhervier.ksp.mod.bulldozer.persistence;
 
-namespace com.github.lhervier.ksp.bulldozermod.terrain
+namespace com.github.lhervier.ksp.mod.bulldozer.terrain
 {
     /// <summary>
     /// Applies the save's blade passes: one exclusion decal per impacted leaf quad, each carrying a mask

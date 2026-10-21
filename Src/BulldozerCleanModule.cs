@@ -3,12 +3,12 @@ using System.Collections.Generic;
 using UnityEngine;
 using Parallax.PQS_Mods;
 using com.github.lhervier.ksp.shared;
-using com.github.lhervier.ksp.bulldozermod.diagnostics;
-using com.github.lhervier.ksp.bulldozermod.parallax;
-using com.github.lhervier.ksp.bulldozermod.persistence;
-using com.github.lhervier.ksp.bulldozermod.terrain;
+using com.github.lhervier.ksp.mod.bulldozer.diagnostics;
+using com.github.lhervier.ksp.mod.bulldozer.parallax;
+using com.github.lhervier.ksp.mod.bulldozer.persistence;
+using com.github.lhervier.ksp.mod.bulldozer.terrain;
 
-namespace com.github.lhervier.ksp.bulldozermod
+namespace com.github.lhervier.ksp.mod.bulldozer
 {
     /// <summary>
     /// The bulldozer blade: clears the scatters (Parallax rocks and the like) along a blade pass, a strip
@@ -65,7 +65,7 @@ namespace com.github.lhervier.ksp.bulldozermod
         // slope even a well-mounted blade leans well away from the horizon.
         //
         // ⚠️ Both numbers are quoted to the player in the parts' own descriptions
-        // (GameData/BulldozerMod/Localization/*.properties, blade*Description) — a copy that nothing keeps
+        // (GameData/KSPModBulldozer/Localization/*.properties, blade*Description) — a copy that nothing keeps
         // in step. GetInfo() below reads them from here, the descriptions do not.
         private const float MaxClearance = 0.5f;
         private const float MaxTilt = 15f;
@@ -81,14 +81,14 @@ namespace com.github.lhervier.ksp.bulldozermod
 
         /// <summary>Length (m) of the pass this blade would clear. Player setting, persisted per part.</summary>
         [KSPField(isPersistant = true, guiActive = true, guiActiveEditor = false,
-                  guiName = "#LOC_BulldozerMod_passLength", guiUnits = "m", guiFormat = "F0")]
+                  guiName = "#LOC_KSPModBulldozer_passLength", guiUnits = "m", guiFormat = "F0")]
         [UI_FloatRange(minValue = MinLength, maxValue = MaxLength, stepIncrement = Step,
                        scene = UI_Scene.Flight)]
         public float passLength = 50f;
 
         /// <summary>Width (m) of the pass this blade would clear. Player setting, persisted per part.</summary>
         [KSPField(isPersistant = true, guiActive = true, guiActiveEditor = false,
-                  guiName = "#LOC_BulldozerMod_passWidth", guiUnits = "m", guiFormat = "F0")]
+                  guiName = "#LOC_KSPModBulldozer_passWidth", guiUnits = "m", guiFormat = "F0")]
         [UI_FloatRange(minValue = MinWidth, maxValue = MaxWidth, stepIncrement = Step,
                        scene = UI_Scene.Flight)]
         public float passWidth = DefaultWidth;
@@ -118,19 +118,19 @@ namespace com.github.lhervier.ksp.bulldozermod
         public string bladeTransform = "";
 
         /// <summary>Wear left, as the PAW shows it.</summary>
-        [KSPField(guiActive = true, guiActiveEditor = true, guiName = "#LOC_BulldozerMod_bladeWear")]
+        [KSPField(guiActive = true, guiActiveEditor = true, guiName = "#LOC_KSPModBulldozer_bladeWear")]
         public string wearStatus = "";
 
         /// <summary>What the pass currently set up would cost, as the PAW shows it.</summary>
-        [KSPField(guiActive = true, guiActiveEditor = false, guiName = "#LOC_BulldozerMod_passCost")]
+        [KSPField(guiActive = true, guiActiveEditor = false, guiName = "#LOC_KSPModBulldozer_passCost")]
         public string costStatus = "";
 
         /// <summary>How high the cutting edge rides over the ground, as the PAW shows it.</summary>
-        [KSPField(guiActive = true, guiActiveEditor = false, guiName = "#LOC_BulldozerMod_bladeClearance")]
+        [KSPField(guiActive = true, guiActiveEditor = false, guiName = "#LOC_KSPModBulldozer_bladeClearance")]
         public string clearanceStatus = "";
 
         /// <summary>How far the blade leans out of the ground plane, as the PAW shows it.</summary>
-        [KSPField(guiActive = true, guiActiveEditor = false, guiName = "#LOC_BulldozerMod_bladeTilt")]
+        [KSPField(guiActive = true, guiActiveEditor = false, guiName = "#LOC_KSPModBulldozer_bladeTilt")]
         public string tiltStatus = "";
 
         private Transform _bladeFace;
@@ -232,7 +232,7 @@ namespace com.github.lhervier.ksp.bulldozermod
         }
 
         [KSPEvent(guiActive = true, guiActiveEditor = false, active = true,
-                  guiName = "#LOC_BulldozerMod_clearScatters")]
+                  guiName = "#LOC_KSPModBulldozer_clearScatters")]
         public void ClearScatters()
         {
             Guarded(PrepareAndConfirm);
@@ -262,7 +262,7 @@ namespace com.github.lhervier.ksp.bulldozermod
         /// with the clusters a narrow pass cannot take out.
         /// </summary>
         [KSPEvent(guiActive = true, guiActiveEditor = false, active = true,
-                  guiName = "#LOC_BulldozerMod_highlightOn")]
+                  guiName = "#LOC_KSPModBulldozer_highlightOn")]
         public void ToggleHighlight()
         {
             // Exclusive: starting a preview here stops whichever blade was running one. Not tidiness — a
@@ -283,7 +283,7 @@ namespace com.github.lhervier.ksp.bulldozermod
         /// blade of a normal game.
         /// </summary>
         [KSPEvent(guiActive = false, guiActiveEditor = false, active = true,
-                  guiName = "#LOC_BulldozerMod_dumpPass")]
+                  guiName = "#LOC_KSPModBulldozer_dumpPass")]
         public void DumpPass()
         {
             try

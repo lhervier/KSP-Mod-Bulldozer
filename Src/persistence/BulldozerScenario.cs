@@ -1,8 +1,8 @@
 using System.Collections.Generic;
 using com.github.lhervier.ksp.shared;
-using com.github.lhervier.ksp.bulldozermod.terrain;
+using com.github.lhervier.ksp.mod.bulldozer.terrain;
 
-namespace com.github.lhervier.ksp.bulldozermod.persistence
+namespace com.github.lhervier.ksp.mod.bulldozer.persistence
 {
     /// <summary>
     /// Per-save store of cleaning actions (the single source of truth — never the in-memory body, which

@@ -1,6 +1,6 @@
 using UnityEngine;
 
-namespace com.github.lhervier.ksp.bulldozermod.terrain
+namespace com.github.lhervier.ksp.mod.bulldozer.terrain
 {
     /// <summary>
     /// How the blade sits over the ground right under it: how high its cutting edge rides, and how far it

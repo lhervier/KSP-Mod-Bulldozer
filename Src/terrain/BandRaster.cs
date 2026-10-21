@@ -1,6 +1,6 @@
 using UnityEngine;
 
-namespace com.github.lhervier.ksp.bulldozermod.terrain
+namespace com.github.lhervier.ksp.mod.bulldozer.terrain
 {
     /// <summary>
     /// A <see cref="SurfaceBand"/> projected into the pixel space of ONE mask, plus the two rules that

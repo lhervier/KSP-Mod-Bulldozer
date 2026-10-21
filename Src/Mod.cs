@@ -1,8 +1,8 @@
 using UnityEngine;
 using com.github.lhervier.ksp.shared;
-using com.github.lhervier.ksp.bulldozermod.settings;
+using com.github.lhervier.ksp.mod.bulldozer.settings;
 
-namespace com.github.lhervier.ksp.bulldozermod
+namespace com.github.lhervier.ksp.mod.bulldozer
 {
     /// <summary>
     /// One-shot startup addon: applies the persisted log level to the shared logger, once for the whole

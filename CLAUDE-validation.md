@@ -2,7 +2,7 @@
 
 Les vérifications faites en jeu (Mune, Gilly, Eve) avec leurs mesures, et les pièges déjà payés : NaN d'`Math.Acos`, `[KSPAssemblyDependency]`, injection hors vol, ombres fantômes du surlignage.
 
-> Fichier de contexte de **KSP-BulldozerMod**. Le fil directeur du projet est dans [CLAUDE.md](CLAUDE.md).
+> Fichier de contexte de **KSP-Mod-Bulldozer**. Le fil directeur du projet est dans [CLAUDE.md](CLAUDE.md).
 
 ## Ce qui est validé — et les pièges qui coûtaient cher
 
@@ -104,14 +104,14 @@ Parallax ne rencontre jamais ce cas : ses propres decals (le KSC) sont posés à
 Tant qu'on se contentait d'**utiliser** des types Parallax, rien à déclarer. Dès qu'on **hérite** de l'un d'eux, KSP doit charger `ParallaxContinued` pour construire notre type — et il chargeait notre DLL **avant** (55.741 contre 55.928), sans savoir où chercher :
 
 ```
-AssemblyLoader: Exception loading 'BulldozerMod': ReflectionTypeLoadException
+AssemblyLoader: Exception loading 'KSPModBulldozer': ReflectionTypeLoadException
   System.IO.FileNotFoundException: Could not load file or assembly 'ParallaxContinued, Version=1.0.0.0'
 ```
 
 Le mod ne se chargeait pas du tout (KSPCommunityFixes l'affiche en clair au démarrage). **Correctif** dans `Src/AssemblyInfo.cs` :
 
 ```csharp
-[assembly: KSPAssembly("BulldozerMod", 1, 0)]
+[assembly: KSPAssembly("KSPModBulldozer", 1, 0)]
 [assembly: KSPAssemblyDependency("Parallax", 1, 0)]
 ```
 

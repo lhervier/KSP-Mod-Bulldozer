@@ -4,7 +4,7 @@ using com.github.lhervier.ksp.shared;
 using com.github.lhervier.ksp.shared.ugui.checkbox;
 using com.github.lhervier.ksp.shared.ugui.combo;
 
-namespace com.github.lhervier.ksp.bulldozermod.ui.ugui
+namespace com.github.lhervier.ksp.mod.bulldozer.ui.ugui
 {
     /// <summary>
     /// Behaviour of the window content: each control drives its setting through the view model, and is

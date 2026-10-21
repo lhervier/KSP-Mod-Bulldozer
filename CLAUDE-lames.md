@@ -2,13 +2,13 @@
 
 Les pièces elles-mêmes : géométrie retenue pour BD-2/BD-3/BD-5, plusieurs lames sur un même vaisseau, les deux livrées, et le reste à faire.
 
-> Fichier de contexte de **KSP-BulldozerMod**. Le fil directeur du projet est dans [CLAUDE.md](CLAUDE.md).
+> Fichier de contexte de **KSP-Mod-Bulldozer**. Le fil directeur du projet est dans [CLAUDE.md](CLAUDE.md).
 
 ## Les lames, et ce qui reste à faire
 
 ### Les trois lames : ce qui a été retenu
 
-Elles remplacent le patch ModuleManager qui posait le module sur tous les modules de commande (`GameData/BulldozerMod/BulldozerMod.cfg`, **supprimé**). Les valeurs sont fixées :
+Elles remplacent le patch ModuleManager qui posait le module sur tous les modules de commande (`GameData/KSPModBulldozer/KSPModBulldozer.cfg`, **supprimé**). Les valeurs sont fixées :
 
 | | BD-2 « Éclaireuse » | BD-3 « Chantier » | BD-5 « Terrassier » |
 |---|---|---|---|

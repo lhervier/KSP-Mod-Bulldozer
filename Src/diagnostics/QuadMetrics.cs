@@ -1,9 +1,9 @@
 using System;
 using UnityEngine;
-using com.github.lhervier.ksp.bulldozermod.terrain;
-using com.github.lhervier.ksp.bulldozermod.utils;
+using com.github.lhervier.ksp.mod.bulldozer.terrain;
+using com.github.lhervier.ksp.mod.bulldozer.utils;
 
-namespace com.github.lhervier.ksp.bulldozermod.diagnostics
+namespace com.github.lhervier.ksp.mod.bulldozer.diagnostics
 {
     /// <summary>
     /// Sizes a leaf quad, for diagnostics only. Nothing in the cleaning path may size anything with this:

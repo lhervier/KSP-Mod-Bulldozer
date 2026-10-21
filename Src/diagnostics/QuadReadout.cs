@@ -3,11 +3,11 @@ using System.Text;
 using UnityEngine;
 using Parallax;
 using Parallax.PQS_Mods;
-using com.github.lhervier.ksp.bulldozermod.parallax;
-using com.github.lhervier.ksp.bulldozermod.terrain;
-using com.github.lhervier.ksp.bulldozermod.utils;
+using com.github.lhervier.ksp.mod.bulldozer.parallax;
+using com.github.lhervier.ksp.mod.bulldozer.terrain;
+using com.github.lhervier.ksp.mod.bulldozer.utils;
 
-namespace com.github.lhervier.ksp.bulldozermod.diagnostics
+namespace com.github.lhervier.ksp.mod.bulldozer.diagnostics
 {
     /// <summary>
     /// The leaf quads around the vessel, as a block of text — what the debug window displays to let the

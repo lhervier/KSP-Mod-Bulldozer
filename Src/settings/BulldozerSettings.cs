@@ -3,7 +3,7 @@ using System.IO;
 using System.Reflection;
 using com.github.lhervier.ksp.shared;
 
-namespace com.github.lhervier.ksp.bulldozermod.settings
+namespace com.github.lhervier.ksp.mod.bulldozer.settings
 {
     /// <summary>
     /// The mod's own settings, per INSTALL rather than per save — they describe how the player wants the

@@ -1,4 +1,4 @@
-namespace com.github.lhervier.ksp.bulldozermod
+namespace com.github.lhervier.ksp.mod.bulldozer
 {
     /// <summary>
     /// The values SEVERAL files have to agree on, and only those.

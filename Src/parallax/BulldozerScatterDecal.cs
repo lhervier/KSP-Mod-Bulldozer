@@ -2,10 +2,10 @@ using System;
 using UnityEngine;
 using Parallax.PQS_Mods;
 using com.github.lhervier.ksp.shared;
-using com.github.lhervier.ksp.bulldozermod.terrain;
-using com.github.lhervier.ksp.bulldozermod.utils;
+using com.github.lhervier.ksp.mod.bulldozer.terrain;
+using com.github.lhervier.ksp.mod.bulldozer.utils;
 
-namespace com.github.lhervier.ksp.bulldozermod.parallax
+namespace com.github.lhervier.ksp.mod.bulldozer.parallax
 {
     /// <summary>
     /// Parallax's scatter-exclusion decal, restricted to a SINGLE leaf quad — the one it is centered on.

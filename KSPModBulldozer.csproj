@@ -1,8 +1,8 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <TargetFramework>net472</TargetFramework>
-    <AssemblyName>BulldozerMod</AssemblyName>
-    <RootNamespace>com.github.lhervier.ksp.bulldozermod</RootNamespace>
+    <AssemblyName>KSPModBulldozer</AssemblyName>
+    <RootNamespace>com.github.lhervier.ksp.mod.bulldozer</RootNamespace>
     <OutputType>Library</OutputType>
     <OutputPath>Output\bin</OutputPath>
     <IntermediateOutputPath>Output\obj</IntermediateOutputPath>

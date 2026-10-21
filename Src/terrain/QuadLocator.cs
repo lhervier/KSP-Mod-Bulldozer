@@ -4,9 +4,9 @@ using UnityEngine;
 using Parallax;
 using Parallax.PQS_Mods;
 using com.github.lhervier.ksp.shared;
-using com.github.lhervier.ksp.bulldozermod.utils;
+using com.github.lhervier.ksp.mod.bulldozer.utils;
 
-namespace com.github.lhervier.ksp.bulldozermod.terrain
+namespace com.github.lhervier.ksp.mod.bulldozer.terrain
 {
     /// <summary>
     /// Locates the leaf quads a blade pass covers, and describes them by position rather than by

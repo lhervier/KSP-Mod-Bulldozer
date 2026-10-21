@@ -1,7 +1,7 @@
 using System;
 using UnityEngine;
 
-namespace com.github.lhervier.ksp.bulldozermod.utils
+namespace com.github.lhervier.ksp.mod.bulldozer.utils
 {
     /// <summary>
     /// Small geometry helpers with no dependency on KSP types. Candidates for a move to KSP-Shared if

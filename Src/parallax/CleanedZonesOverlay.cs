@@ -3,9 +3,9 @@ using Unity.Collections;
 using UnityEngine;
 using Parallax.PQS_Mods;
 using com.github.lhervier.ksp.shared;
-using com.github.lhervier.ksp.bulldozermod.terrain;
+using com.github.lhervier.ksp.mod.bulldozer.terrain;
 
-namespace com.github.lhervier.ksp.bulldozermod.parallax
+namespace com.github.lhervier.ksp.mod.bulldozer.parallax
 {
     /// <summary>
     /// Paints in green, on the ground, every cell already cleared around the vessel. A debug overlay,

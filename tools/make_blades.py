@@ -2,7 +2,7 @@
 """
 Generates the three bulldozer blade models (BD-2 / BD-3 / BD-5) and exports them to .mu.
 
-    blender --background --python tools/make_blades.py -- --out GameData/BulldozerMod/Parts
+    blender --background --python tools/make_blades.py -- --out GameData/KSPModBulldozer/Parts
 
 Without --out the blades are only built in the current scene, side by side, so the shapes can be
 looked at in the viewport before anything is written. Needs the io_object_mu addon enabled.
@@ -130,7 +130,7 @@ MAT_EDGE = "Edge"    # the cutting lip alone
 # _SpecColor. Adding an alpha would give a third knob -- but a shared one, since both liveries
 # sample the same texture.
 LIVERIES = (
-    ("Steel", "Gray", "#LOC_BulldozerMod_bladeVariantSteel", {
+    ("Steel", "Gray", "#LOC_KSPModBulldozer_bladeVariantSteel", {
         #            _Color              _SpecColor          _Shininess
         MAT_BODY: ((0.52, 0.54, 0.56), (0.35, 0.36, 0.38), 0.30),
         MAT_EDGE: ((0.20, 0.21, 0.23), (0.35, 0.36, 0.38), 0.55),
@@ -139,7 +139,7 @@ LIVERIES = (
     # lip keeps a slightly tighter highlight than the body -- a cutting edge gets burnished by the
     # work -- and stays noticeably darker, as it does on the raw livery, so the blade keeps its
     # shape at a distance instead of turning into one flat sheet.
-    ("Stainless", "Silver", "#LOC_BulldozerMod_bladeVariantStainless", {
+    ("Stainless", "Silver", "#LOC_KSPModBulldozer_bladeVariantStainless", {
         MAT_BODY: ((0.86, 0.88, 0.90), (0.50, 0.52, 0.55), 0.50),
         MAT_EDGE: ((0.48, 0.50, 0.53), (0.46, 0.48, 0.51), 0.60),
     }),
@@ -650,7 +650,7 @@ def main():
         print("    Unity bounds  x %.3f..%.3f   y %.3f..%.3f (up)   z %.3f..%.3f (faces)"
               % (xs[0], xs[1], ys[0], ys[1], zs[0], zs[1]))
         print("    cfg lines:")
-        print("        MODEL { model = BulldozerMod/Parts/%s }" % r["name"])
+        print("        MODEL { model = KSPModBulldozer/Parts/%s }" % r["name"])
         print("        node_attach = 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 1")
         print("        node_stack_backTop = 0.0, %.4f, 0.0, 0.0, 0.0, -1.0, 1"
               % r["top_stack_node_y"])

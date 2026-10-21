@@ -2,7 +2,7 @@
 
 Comment le mod supprime les rochers Parallax sans toucher au relief : le PQSMod d'exclusion, la texture masque, son repère, sa résolution, la construction d'une passe de lame, et la géométrie réelle des quads et des grappes de scatters.
 
-> Fichier de contexte de **KSP-BulldozerMod**. Le fil directeur du projet est dans [CLAUDE.md](CLAUDE.md).
+> Fichier de contexte de **KSP-Mod-Bulldozer**. Le fil directeur du projet est dans [CLAUDE.md](CLAUDE.md).
 
 ## Objectif et mécanisme
 

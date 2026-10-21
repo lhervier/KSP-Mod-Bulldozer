@@ -3,7 +3,7 @@ using Unity.Collections;
 using UnityEngine;
 using com.github.lhervier.ksp.shared;
 
-namespace com.github.lhervier.ksp.bulldozermod.terrain
+namespace com.github.lhervier.ksp.mod.bulldozer.terrain
 {
     /// <summary>
     /// The mask texture handed to one exclusion decal, plus the projection that turns surface coordinates

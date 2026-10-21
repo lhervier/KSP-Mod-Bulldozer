@@ -1,8 +1,8 @@
 using UnityEngine;
 using Parallax.PQS_Mods;
-using com.github.lhervier.ksp.bulldozermod.parallax;
+using com.github.lhervier.ksp.mod.bulldozer.parallax;
 
-namespace com.github.lhervier.ksp.bulldozermod.terrain
+namespace com.github.lhervier.ksp.mod.bulldozer.terrain
 {
     /// <summary>A leaf quad, identified by the direction of its center in BODY FRAME.</summary>
     public struct QuadRef

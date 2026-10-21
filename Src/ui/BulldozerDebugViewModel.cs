@@ -1,10 +1,10 @@
 using UnityEngine;
 using com.github.lhervier.ksp.shared;
-using com.github.lhervier.ksp.bulldozermod.diagnostics;
-using com.github.lhervier.ksp.bulldozermod.parallax;
-using com.github.lhervier.ksp.bulldozermod.settings;
+using com.github.lhervier.ksp.mod.bulldozer.diagnostics;
+using com.github.lhervier.ksp.mod.bulldozer.parallax;
+using com.github.lhervier.ksp.mod.bulldozer.settings;
 
-namespace com.github.lhervier.ksp.bulldozermod.ui
+namespace com.github.lhervier.ksp.mod.bulldozer.ui
 {
     /// <summary>
     /// State of the debug window: plain properties that fire a KSP EventVoid on change, which the uGUI

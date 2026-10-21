@@ -1,4 +1,4 @@
-namespace com.github.lhervier.ksp.bulldozermod.ui.styles
+namespace com.github.lhervier.ksp.mod.bulldozer.ui.styles
 {
     /// <summary>
     /// Sizes and colors proper to the Bulldozer debug window. Anything already shared (paddings, label

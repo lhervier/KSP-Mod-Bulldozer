@@ -107,7 +107,7 @@ $verticalShift = -0.062
 $fillFraction  = 0.93
 
 # Resolve the output relative to this script, independent of the CWD.
-$iconPath = Join-Path $PSScriptRoot '..\GameData\BulldozerMod\icon.png'
+$iconPath = Join-Path $PSScriptRoot '..\GameData\KSPModBulldozer\icon.png'
 $iconPath = [System.IO.Path]::GetFullPath($iconPath)
 
 $work = $size * $scale

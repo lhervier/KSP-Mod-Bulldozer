@@ -2,7 +2,7 @@
 
 Ce que contient chaque fichier source, et l'outillage de diagnostic en jeu (fenêtre de debug, relevé de limite de quad).
 
-> Fichier de contexte de **KSP-BulldozerMod**. Le fil directeur du projet est dans [CLAUDE.md](CLAUDE.md).
+> Fichier de contexte de **KSP-Mod-Bulldozer**. Le fil directeur du projet est dans [CLAUDE.md](CLAUDE.md).
 
 ## État du code
 
@@ -12,8 +12,8 @@ Le squelette de persistance et d'application « à froid » a été conservé ; 
 |---|---|
 | `Src/BulldozerCleanModule.cs` | Le `PartModule` des trois lames : entrée PAW **« Passer la lame »**, curseurs **longueur** (5→200 m) et **largeur** (5→20 m) par pas de 5 m, **usure restante**, **coût de la passe** — remplacé par **la zone qui réserve le terrain** quand un autre mod tient un des quads visés —, **hauteur au sol** et **inclinaison** en direct. Construit la bande, relève les quads impactés, applique les règles de refus **et le quota**, **demande confirmation**, puis débite la lame, enregistre l'action et save+reload. `TryBuildBand` ne prend qu'une **lame** — origine = son tranchant, direction = son `bladeFace` — et c'est le **seul** chemin : les calques l'appellent aussi, avec la lame en aperçu, pour viser la bande exacte du clic |
 | `Src/terrain/PassCost.cs` | Ce qu'une passe coûte : les cases qu'elle ferait passer de blanc à noir, **chacune imputée au seul quad qui la possède**. Repasser sur du propre est gratuit ; nettoyer un terrain sans cailloux est plein tarif |
-| `GameData/BulldozerMod/Parts/*.cfg` | Les trois lames (BD-2 / BD-3 / BD-5), branchées sur leurs propres modèles, et leur `ModulePartVariants` : **deux livrées** pour une seule entrée dans la liste de l'éditeur |
-| `GameData/BulldozerMod/Parts/*.mu` | Les maillages, **produits de build** : ne jamais les éditer, relancer le générateur |
+| `GameData/KSPModBulldozer/Parts/*.cfg` | Les trois lames (BD-2 / BD-3 / BD-5), branchées sur leurs propres modèles, et leur `ModulePartVariants` : **deux livrées** pour une seule entrée dans la liste de l'éditeur |
+| `GameData/KSPModBulldozer/Parts/*.mu` | Les maillages, **produits de build** : ne jamais les éditer, relancer le générateur |
 | `tools/make_blades.py` | Génère les trois modèles et les exporte en `.mu`. Toute la géométrie dérive de la **largeur** ; c'est aussi le seul endroit où vivent la convention d'axes Blender→Unity, la garantie « rien sous le point d'attache », et les **deux livrées** — celle que le `.mu` embarque et celle qui n'existe qu'en `.cfg`, dont il imprime le bloc |
 | `tools/render_blades.py` | Rend les trois lames en PNG en **important** le générateur — donc jamais une seconde description de la forme **ni de la peinture**. Une image par vue et par livrée : c'est le seul moyen de voir une livrée qui n'existe qu'en `.cfg` sans installer le mod. Dessine aussi le **sol** et une **charnière fictive à plat** plantée dans le nœud haut — les deux ensemble répondent à la seule question que ce nœud pose : bras à l'horizontale, le tranchant touche-t-il, et le raccord est-il droit ? `--blade` isole une lame et débloque les vues de **profil strict** et de 3/4 arrière, seules capables de le montrer. Cadrage et focale **ajustés** à la géométrie, pour que les vues ne sortent pas du champ en silence quand les constantes changent. Sort dans `tools/renders/`, **non versionné** : ce sont des rendus de contrôle, à régénérer, pas du contenu de dépôt |
 | `Src/parallax/ParallaxInterop.cs` | Tout ce qu'on fait avec Parallax : pose du decal, liste des scatters d'un corps, purge du registre statique. **Compilé contre `ParallaxContinued.dll`** : une évolution de son API casse le build, pas le vol |
@@ -37,7 +37,7 @@ Le squelette de persistance et d'application « à froid » a été conservé ; 
 | `Src/ui/ugui/**`, `Src/ui/styles/` | Les composants uGUI, un `Builder` + un `Controller` chacun (pattern `KSP-Shared`). `QuadReadout*` est le seul qui ne pilote **aucun** réglage : il lit le monde, se rafraîchit tout seul 2×/s, et n'est donc pas passé au `ContentController` |
 | `Src/settings/BulldozerSettings.cs` | Les réglages **par installation** (`PluginData/bulldozer.cfg`) — jamais des données de partie : les zones nettoyées, elles, sont dans le `ScenarioModule` |
 | `Src/Mod.cs` | L'addon de démarrage (`PSystemSpawn`, une fois par session) : il ne fait qu'appliquer le **niveau de log** persisté, avant que quoi que ce soit ait logué |
-| `tools/create_icon.ps1` | Génère `GameData/BulldozerMod/icon.png` (38 px, silhouette blanche sur fond transparent, au style des mods frères). Produit de build : ne pas retoucher le PNG, relancer le script |
+| `tools/create_icon.ps1` | Génère `GameData/KSPModBulldozer/icon.png` (38 px, silhouette blanche sur fond transparent, au style des mods frères). Produit de build : ne pas retoucher le PNG, relancer le script |
 | `Src/diagnostics/QuadReadout.cs` | **Outil de test** : le texte des quads voisins, affiché par la fenêtre de debug — voir ci-dessous |
 | `Src/diagnostics/BandDiagnostic.cs` | **Outil de test** (entrée PAW « Analyser la passe ») : dump lecture seule de tout ce qu'une passe déciderait. Conçu pour séparer quatre pannes qui se ressemblent à l'écran — projection fausse, familles non surlignables, une lame étroite face à des grappes, ou un decal que Parallax n'a jamais câblé. C'est lui qui a prouvé la visée ([CLAUDE-validation.md](CLAUDE-validation.md)) et permis de chiffrer le bug du cap |
 

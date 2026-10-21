@@ -1,9 +1,9 @@
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.Rendering;
-using com.github.lhervier.ksp.bulldozermod.terrain;
+using com.github.lhervier.ksp.mod.bulldozer.terrain;
 
-namespace com.github.lhervier.ksp.bulldozermod.parallax
+namespace com.github.lhervier.ksp.mod.bulldozer.parallax
 {
     /// <summary>
     /// A sheet of mask cells laid on the terrain: the geometry every ground overlay of this mod is made of.

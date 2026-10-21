@@ -1,8 +1,8 @@
 using System.Collections.Generic;
 using UnityEngine;
-using com.github.lhervier.ksp.bulldozermod.terrain;
+using com.github.lhervier.ksp.mod.bulldozer.terrain;
 
-namespace com.github.lhervier.ksp.bulldozermod.persistence
+namespace com.github.lhervier.ksp.mod.bulldozer.persistence
 {
     /// <summary>
     /// One blade pass, stored per-save (event-sourcing) and replayed at load: the strip to clear, plus the

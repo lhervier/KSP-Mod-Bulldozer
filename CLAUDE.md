@@ -1,4 +1,4 @@
-# KSP-BulldozerMod — nettoyer une zone de ses rochers (scatters)
+# KSP-Mod-Bulldozer — nettoyer une zone de ses rochers (scatters)
 
 > **Ce fichier est LE document du projet** : `README.md` n'est qu'un pointeur vers lui. Un seul document, pour qu'il n'y en ait pas deux à garder en phase.
 >

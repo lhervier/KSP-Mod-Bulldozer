@@ -1,10 +1,10 @@
 ﻿using System.Collections.Generic;
 using UnityEngine;
 using com.github.lhervier.ksp.shared;
-using com.github.lhervier.ksp.bulldozermod.terrain;
-using com.github.lhervier.ksp.bulldozermod.utils;
+using com.github.lhervier.ksp.mod.bulldozer.terrain;
+using com.github.lhervier.ksp.mod.bulldozer.utils;
 
-namespace com.github.lhervier.ksp.bulldozermod.parallax
+namespace com.github.lhervier.ksp.mod.bulldozer.parallax
 {
     /// <summary>
     /// Paints, on the ground, the patch of surface a blade pass would clear. Drawn alongside

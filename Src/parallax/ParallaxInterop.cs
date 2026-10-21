@@ -4,7 +4,7 @@ using Parallax;
 using Parallax.PQS_Mods;
 using com.github.lhervier.ksp.shared;
 
-namespace com.github.lhervier.ksp.bulldozermod.parallax
+namespace com.github.lhervier.ksp.mod.bulldozer.parallax
 {
     /// <summary>
     /// Everything this mod does with ParallaxContinued, in one place.

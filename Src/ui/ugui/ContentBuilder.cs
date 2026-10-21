@@ -4,9 +4,9 @@ using com.github.lhervier.ksp.shared;
 using com.github.lhervier.ksp.shared.ugui;
 using com.github.lhervier.ksp.shared.ugui.checkbox;
 using com.github.lhervier.ksp.shared.ugui.combo;
-using com.github.lhervier.ksp.bulldozermod.ui.styles;
+using com.github.lhervier.ksp.mod.bulldozer.ui.styles;
 
-namespace com.github.lhervier.ksp.bulldozermod.ui.ugui
+namespace com.github.lhervier.ksp.mod.bulldozer.ui.ugui
 {
     /// <summary>
     /// Popup content (everything below the shared title bar): the debug switches, one per row, then the

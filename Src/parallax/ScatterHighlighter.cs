@@ -5,9 +5,9 @@ using UnityEngine.Rendering;
 using Parallax;
 using Parallax.PQS_Mods;
 using com.github.lhervier.ksp.shared;
-using com.github.lhervier.ksp.bulldozermod.terrain;
+using com.github.lhervier.ksp.mod.bulldozer.terrain;
 
-namespace com.github.lhervier.ksp.bulldozermod.parallax
+namespace com.github.lhervier.ksp.mod.bulldozer.parallax
 {
     /// <summary>
     /// Draws, every frame, an overlay over the collideable scatters that a blade pass would remove right
