@@ -204,6 +204,40 @@ Hence the design: blades that are **heavy**, **not refillable**, and **capped in
 
 ---
 
+## Roadmap
+
+What is planned for the next versions. **None of it is in the current release**: the chapters above describe the mod as it is today.
+
+### The preview and the cleared zones become part of the game
+
+Both are game features, not debug views, and are switched on by default.
+
+- **Cleared zones, always visible.** The green overlay of every zone already cleared is shown whenever you fly a vessel that carries a blade. It is no longer reached through a debug window.
+- **The preview, always on.** It no longer has to be turned on blade by blade. It shows what the blades of the vessel you are flying would clear, and only theirs. A rover with two blades shows both passes; clicking a blade applies **that blade's** pass. It can still be turned off, for instance to drive the bulldozer somewhere without clearing anything.
+
+### Three shapes of pass
+
+The blade's PAW lets you pick a shape:
+
+- **Strip**: the current pass, from the cutting edge, in the direction the blade faces, with its length and width.
+- **Disc**: centred on the rover. You set its radius. Like everything else, its edge follows the 5 m cells.
+- **Square**: centred on the rover. You only set the length of its sides, not its orientation.
+
+The blade still has to be in a working position (close to the ground, sitting flat on it) for any shape.
+
+### Vessels in the way
+
+- **A vessel standing in the zone blocks the pass.** It is painted red in the preview, like the rocks. The PAW replaces the pass button with the count: *There are 2 vessels in the area*. The vessel you are flying never counts.
+- **Only the vessel's root part counts.** A vessel whose root part stands anywhere in the pass blocks it, **even on ground cleared earlier**: going over it again costs no wear, but the bulldozer still drives through. A vessel that only overhangs the zone does not block the pass, and the rocks under its overhanging parts are cleared. As with rock clusters, the zone's edge is approximate, and that is fine.
+- **…or the bulldozer flattens them.** Instead of refusing the pass, the confirmation dialog warns that these vessels will be destroyed. If you accept, the bulldozer demolishes them along with the rocks. **Kerbals are never crushed:** a crewed vessel or a Kerbal on EVA always blocks the pass.
+- The detection can be switched off. The bulldozer then ignores vessels completely, neither blocking nor destroying them.
+
+### Settings move to the difficulty settings
+
+The options above (preview, cleared zones, vessel detection) move to the game's **difficulty settings**, in a section of their own, like many other mods. There is nothing to open in flight any more. The toolbar window becomes a developer tool (log level, diagnostics) and only appears when a flag is set in a config file under `PluginData`.
+
+---
+
 ## Building from source
 
 The shared code lives in the [KSP-Shared](https://github.com/lhervier/KSP-Shared) repository, as a git submodule compiled directly into the mod's DLL:
