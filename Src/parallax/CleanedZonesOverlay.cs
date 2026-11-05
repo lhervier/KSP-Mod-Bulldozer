@@ -25,8 +25,8 @@ namespace com.github.lhervier.ksp.mod.bulldozer.parallax
     ///
     /// What it does NOT show, deliberately: whether the rocks actually went. The mask is only consulted
     /// when Parallax builds a quad, so a green cell says "this ground is excluded", not "this ground is
-    /// clear". A boulder standing on green is either a cluster anchored outside (its mesh reaches in — see
-    /// the cluster trap in CLAUDE.md) or a quad that was already built when the decal was injected. Telling
+    /// clear". A boulder standing on green is either a cluster anchored outside (its mesh reaches in: a
+    /// large-rock instance is a cluster of boulders spread over 15-25 m) or a quad that was already built when the decal was injected. Telling
     /// those two apart is exactly what the overlay is for.
     /// </summary>
     [KSPAddon(KSPAddon.Startup.Flight, false)]

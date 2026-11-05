@@ -87,7 +87,7 @@
     <Compile Include="Src\**\*.cs" />
     <!-- The whole shared module, uGUI toolkit included: the debug window is built with it, which is
          what the extra UnityEngine.UI / UIModule / TextRendering / Input references above are for.
-         Compiled into this DLL file by file, never referenced as a binary (see the kspmod CLAUDE.md). -->
+         Compiled into this DLL file by file, never referenced as a binary (KSP-Shared is a git submodule). -->
     <Compile Include="KSP-Shared\Src\**\*.cs" />
   </ItemGroup>
 </Project>

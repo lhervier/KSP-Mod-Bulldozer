@@ -23,7 +23,7 @@ namespace com.github.lhervier.ksp.mod.bulldozer.parallax
         // "KSP/Alpha/Unlit Transparent" is DELIBERATELY ABSENT and must not be put back: drawing an overlay
         // with it leaves black patches on the rocks that survive into the following frames as silhouettes
         // frozen in screen space. Every other candidate here was tried in flight at the same spot, none
-        // shows it. See CLAUDE.md.
+        // shows it.
         //
         // Only the first two are translucent, which is what an overlay wants; the last three hide what is
         // under them behind a flat red and are a last resort - a coarse overlay still beats none. The one we

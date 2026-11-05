@@ -13,7 +13,7 @@ namespace com.github.lhervier.ksp.mod.bulldozer.terrain
     /// a value &lt; 0.5 blocks the scatter. So 255 = keep the scatter, 0 = clear it.
     ///
     /// The mask covers a SQUARE of 2 x decalRadius, centered on the decal and oriented by the decal's `rot`
-    /// (see "Le repère du masque" in CLAUDE.md). It is NOT aligned with the quad, and it is not stretched
+    /// (BulldozerScatterDecal.RotationFor). It is NOT aligned with the quad, and it is not stretched
     /// onto it either: both axes use the same scale, so a pixel is always a SQUARE on the ground whatever
     /// the quad's own shape.
     ///
@@ -31,7 +31,7 @@ namespace com.github.lhervier.ksp.mod.bulldozer.terrain
         /// A fixed texture size cannot: the footprint follows the quad, measured in game from 299 m on
         /// Gilly to 2016 m on Eve, so one texture size would swing the ground resolution by that same
         /// factor. Note that maxLevel differs per body (7 on Gilly, 9 on the Mun, 10 on Kerbin and Eve),
-        /// which is what keeps that spread down to ~7x. See "Taille du masque" in CLAUDE.md.
+        /// which is what keeps that spread down to ~7x.
         /// </summary>
         public const double MetersPerPixel = 5.0;
 
