@@ -232,6 +232,24 @@ The blade still has to be in a working position (close to the ground, sitting fl
 - **…or the bulldozer flattens them.** Instead of refusing the pass, the confirmation dialog warns that these vessels will be destroyed. If you accept, the bulldozer demolishes them along with the rocks. **Kerbals are never crushed:** a crewed vessel or a Kerbal on EVA always blocks the pass.
 - The detection can be switched off. The bulldozer then ignores vessels completely, neither blocking nor destroying them.
 
+### Engineers can handle the blades
+
+- **The blades become EVA construction parts.** An engineer on EVA can pick one up, move it, and attach it to a rover or detach it, like any other part in the game's EVA construction mode. A worn-out blade can be swapped for a new one on site, and a blade landed on its own can be fitted where it is needed.
+- **But it takes a crew.** The blades keep their mass: they are heavy on purpose, and that does not change. One engineer cannot lift one alone. Several engineers working together can, so fitting a blade means bringing a team, and the bigger the blade, the bigger the team. A BD-5 is a job for a whole worksite.
+
+### Bucket drums, for low gravity
+
+On a low-gravity body, a blade has a real-life problem: the machine weighs almost nothing, so it has almost no grip on the ground. Cutting into the soil takes the same force as anywhere else, and the wheels just spin. NASA's answer is the RASSOR prototype (Regolith Advanced Surface Systems Operations Robot, Kennedy Space Center): two bucket drums on opposing arms, spinning in opposite directions, so that their digging forces cancel out. The robot does not need to be heavy to dig.
+
+The plan is to let you build that kind of machine:
+
+- **A new part: the bucket drum.** The rest is up to you: the arms can be Breaking Ground robotic hinges, the chassis any rover. You assemble your own excavator rather than getting a ready-made robot.
+- **Blades need a heavy rover.** A blade digs by pushing, and pushing takes grip, which takes weight. So a blade only works on a vessel that weighs at least a certain amount. **Weight, not mass**: the vessel's mass times the local gravity. The same rover that pushes happily on Kerbin weighs a sixth of that on the Mun and almost nothing on Gilly. Below the threshold, the pass is refused, with the figures.
+- **Drums don't.** A drum is light, and the vessel carrying it can be light too: drums do not rely on weight. But they only clear ground when the vessel carries **two drums spinning in opposite directions**, both touching the ground. Otherwise the pass is refused, and the PAW says why. The blade, on its heavy rover, is the tool for the Mun and Kerbin; the drums are the tool for Minmus and Gilly.
+- **They dig ore too.** The real RASSOR exists to collect regolith for in-situ resource use. The drums would also harvest `Ore`, so the machine that clears a base site also feeds it.
+
+The details are still open (the minimum weight for a blade, shape of the pass, wear, mass, ore, what happens with only one drum…). This chapter describes the idea, not its final rules.
+
 ### Settings move to the difficulty settings
 
 The options above (preview, cleared zones, vessel detection) move to the game's **difficulty settings**, in a section of their own, like many other mods. There is nothing to open in flight any more. The toolbar window becomes a developer tool (log level, diagnostics) and only appears when a flag is set in a config file under `PluginData`.
