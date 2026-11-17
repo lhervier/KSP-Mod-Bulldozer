@@ -3,6 +3,8 @@
     <TargetFramework>net472</TargetFramework>
     <AssemblyName>KSPModBulldozer</AssemblyName>
     <RootNamespace>com.github.lhervier.ksp.mod.bulldozer</RootNamespace>
+    <Version>0.1.0-dev</Version>
+    <Description>Mod for KSP to clear the ground scatters (Parallax rocks) around a rover</Description>
     <OutputType>Library</OutputType>
     <OutputPath>Output\bin</OutputPath>
     <IntermediateOutputPath>Output\obj</IntermediateOutputPath>
@@ -11,8 +13,6 @@
     <DebugSymbols>true</DebugSymbols>
     <Optimize>false</Optimize>
     <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
-    <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
-    <Deterministic>false</Deterministic>
     <!-- ParallaxContinued.dll is built against .NET 4.8 while this mod (like its siblings) targets 4.7.2.
          The gap is a compile-time check only: KSP's Mono runtime loads both all the same. -->
     <ResolveAssemblyReferenceIgnoreTargetFrameworkAttributeVersionMismatch>true</ResolveAssemblyReferenceIgnoreTargetFrameworkAttributeVersionMismatch>
