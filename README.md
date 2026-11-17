@@ -204,7 +204,7 @@ Hence the design: blades that are **heavy**, **not refillable**, and **capped in
 
 ---
 
-## Roadmap
+## Work in progress
 
 What is planned for the next versions. **None of it is in the current release**: the chapters above describe the mod as it is today.
 
